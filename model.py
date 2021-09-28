@@ -23,7 +23,11 @@ import paddle.nn.functional as F
 
 
 class DualEncoder(nn.Layer):
-    def __init__(self, pretrained_model, dropout=None, output_emb_size=None):
+    def __init__(self,
+                 pretrained_model,
+                 dropout=None,
+                 output_emb_size=None,
+                 use_cross_batch=False):
         super().__init__()
         self.ptm = pretrained_model
         self.dropout = nn.Dropout(dropout if dropout is not None else 0.1)
@@ -39,6 +43,12 @@ class DualEncoder(nn.Layer):
             self.emb_reduce_linear = paddle.nn.Linear(
                 768, output_emb_size, weight_attr=weight_attr)
 
+        self.use_cross_batch = use_cross_batch
+        if self.use_cross_batch:
+            self.rank = paddle.distributed.get_rank()
+        else:
+            self.rank = 0
+
     def get_pooled_embedding(self,
                              input_ids,
                              token_type_ids=None,
@@ -47,7 +57,7 @@ class DualEncoder(nn.Layer):
         _, cls_embedding = self.ptm(input_ids, token_type_ids, position_ids,
                                     attention_mask)
 
-        if self.output_emb_size  is not None and self.output_emb_size > 0:
+        if self.output_emb_size is not None and self.output_emb_size > 0:
             cls_embedding = self.emb_reduce_linear(cls_embedding)
         cls_embedding = self.dropout(cls_embedding)
         cls_embedding = F.normalize(cls_embedding, p=2, axis=-1)
@@ -86,48 +96,57 @@ class DualEncoder(nn.Layer):
             query_attention_mask)
 
         pos_title_cls_embedding = self.get_pooled_embedding(
-            pos_title_input_ids, pos_title_token_type_ids, pos_title_position_ids,
-            pos_title_attention_mask)
+            pos_title_input_ids, pos_title_token_type_ids,
+            pos_title_position_ids, pos_title_attention_mask)
 
         neg_title_cls_embedding = self.get_pooled_embedding(
-            neg_title_input_ids, neg_title_token_type_ids, neg_title_position_ids,
-            neg_title_attention_mask)
+            neg_title_input_ids, neg_title_token_type_ids,
+            neg_title_position_ids, neg_title_attention_mask)
 
         cosine_sim = paddle.sum(query_cls_embedding * title_cls_embedding,
                                 axis=-1)
         return cosine_sim
 
     def forward(self,
-        query_input_ids,
-        pos_title_input_ids,
-        neg_title_input_ids,
-        query_token_type_ids=None,
-        query_position_ids=None,
-        query_attention_mask=None,
-        pos_title_token_type_ids=None,
-        pos_title_position_ids=None,
-        pos_title_attention_mask=None,
-        neg_title_token_type_ids=None,
-        neg_title_position_ids=None,
-        neg_title_attention_mask=None):
+                query_input_ids,
+                pos_title_input_ids,
+                neg_title_input_ids,
+                query_token_type_ids=None,
+                query_position_ids=None,
+                query_attention_mask=None,
+                pos_title_token_type_ids=None,
+                pos_title_position_ids=None,
+                pos_title_attention_mask=None,
+                neg_title_token_type_ids=None,
+                neg_title_position_ids=None,
+                neg_title_attention_mask=None):
 
         query_cls_embedding = self.get_pooled_embedding(
             query_input_ids, query_token_type_ids, query_position_ids,
             query_attention_mask)
 
         pos_title_cls_embedding = self.get_pooled_embedding(
-            pos_title_input_ids, pos_title_token_type_ids, pos_title_position_ids,
-            pos_title_attention_mask)
-        
+            pos_title_input_ids, pos_title_token_type_ids,
+            pos_title_position_ids, pos_title_attention_mask)
+
         neg_title_cls_embedding = self.get_pooled_embedding(
-            neg_title_input_ids, neg_title_token_type_ids, neg_title_position_ids,
-            neg_title_attention_mask)
+            neg_title_input_ids, neg_title_token_type_ids,
+            neg_title_position_ids, neg_title_attention_mask)
 
-        all_title_cls_embedding = paddle.concat(x=[pos_title_cls_embedding, neg_title_cls_embedding], axis=0)
+        all_title_cls_embedding = paddle.concat(
+            x=[pos_title_cls_embedding, neg_title_cls_embedding], axis=0)
+        #print("title cls_emb shape:{}".format(all_title_cls_embedding.shape))
 
+        if self.use_cross_batch:
+            tensor_list = []
+            paddle.distributed.all_gather(tensor_list, all_title_cls_embedding)
+            all_title_cls_embedding = paddle.concat(x=tensor_list, axis=0)
+            #print("gathered title cls_emb shape:{}".format(all_title_cls_embedding.shape))
+
+        # multiply
         logits = paddle.matmul(
             query_cls_embedding, all_title_cls_embedding, transpose_y=True)
-        
+
         # substract margin from all positive samples cosine_sim()
         # margin_diag = paddle.full(
         #     shape=[query_cls_embedding.shape[0]],
@@ -138,7 +157,17 @@ class DualEncoder(nn.Layer):
         # # scale cosine to ease training converge
         # cosine_sim *= self.sacle
 
-        labels = paddle.arange(0, query_cls_embedding.shape[0], dtype='int64')
+        #all_labels = np.array(range(batch_size * worker_id * 2, batch_size * (worker_id * 2 + 1)), dtype='int64')
+
+        batch_size = query_cls_embedding.shape[0]
+
+        # self.rank = 0
+        #print("local rank:{}".format(self.rank))
+        #print("label range:{} \t {}".format(batch_size * self.rank * 2, batch_size * (self.rank * 2 + 1)))
+        labels = paddle.arange(
+            batch_size * self.rank * 2,
+            batch_size * (self.rank * 2 + 1),
+            dtype='int64')
         labels = paddle.reshape(labels, shape=[-1, 1])
 
         loss = F.cross_entropy(input=logits, label=labels)

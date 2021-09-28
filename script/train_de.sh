@@ -35,3 +35,4 @@ ${PYTHON_BIN} -u -m paddle.distributed.launch --gpus "2,3" --log_dir "logs" \
     --query_max_seq_length ${q_max_len} \
     --title_max_seq_length ${p_max_len} \
     --train_set_file ${train_data} \
+    --use_cross_batch
