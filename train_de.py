@@ -27,6 +27,7 @@ import paddlenlp as ppnlp
 from paddlenlp.data import Stack, Tuple, Pad
 from paddlenlp.datasets import load_dataset
 from paddlenlp.transformers import LinearDecayWithWarmup
+from paddle.distributed.fleet.utils.hybrid_parallel_util import fused_allreduce_gradients
 
 from model import DualEncoder
 from data import read_train_data, convert_example, create_dataloader
@@ -68,6 +69,7 @@ def do_train():
     paddle.set_device(args.device)
     rank = paddle.distributed.get_rank()
     if paddle.distributed.get_world_size() > 1:
+        print("init parallel env ********************************************")
         paddle.distributed.init_parallel_env()
 
     set_seed(args.seed)
@@ -84,7 +86,8 @@ def do_train():
     # If you wanna use bert/roberta pretrained model,
     # tokenizer = ppnlp.transformers.BertTokenizer.from_pretrained('bert-base-chinese')
     # tokenizer = ppnlp.transformers.RobertaTokenizer.from_pretrained('roberta-wwm-ext')
-    tokenizer = ppnlp.transformers.ErnieTokenizer.from_pretrained('ernie-2.0-en')
+    tokenizer = ppnlp.transformers.ErnieTokenizer.from_pretrained(
+        'ernie-2.0-en')
 
     trans_func = partial(
         convert_example,
@@ -138,26 +141,32 @@ def do_train():
     tic_train = time.time()
     for epoch in range(1, args.epochs + 1):
         for step, batch in enumerate(train_data_loader, start=1):
-            (query_input_ids, query_token_type_ids,
-             pos_title_input_ids, pos_title_token_type_ids,
-             neg_title_input_ids, neg_title_token_type_ids)  = batch
+            (query_input_ids, query_token_type_ids, pos_title_input_ids,
+             pos_title_token_type_ids, neg_title_input_ids,
+             neg_title_token_type_ids) = batch
 
-            loss = model(
-                query_input_ids=query_input_ids,
-                pos_title_input_ids=pos_title_input_ids,
-                neg_title_input_ids=neg_title_input_ids,
-                query_token_type_ids=query_token_type_ids,
-                pos_title_token_type_ids=pos_title_token_type_ids,
-                neg_title_token_type_ids=neg_title_token_type_ids)
+            # skip gradient synchronization by 'no_sync'
+            with model.no_sync():
+                loss = model(
+                    query_input_ids=query_input_ids,
+                    pos_title_input_ids=pos_title_input_ids,
+                    neg_title_input_ids=neg_title_input_ids,
+                    query_token_type_ids=query_token_type_ids,
+                    pos_title_token_type_ids=pos_title_token_type_ids,
+                    neg_title_token_type_ids=neg_title_token_type_ids)
 
-            global_step += 1
-            if global_step % 10 == 0 and rank == 0:
-                print(
-                    "global step %d, epoch: %d, batch: %d, loss: %.5f, speed: %.2f step/s"
-                    % (global_step, epoch, step, loss,
-                       10 / (time.time() - tic_train)))
-                tic_train = time.time()
-            loss.backward()
+                global_step += 1
+                if global_step % 10 == 0:
+                    print(
+                        "global step %d, epoch: %d, batch: %d, loss: %.5f, speed: %.2f step/s"
+                        % (global_step, epoch, step, loss,
+                           10 / (time.time() - tic_train)))
+                    tic_train = time.time()
+                loss.backward()
+
+            # step 2 : fuse + allreduce manually before optimization
+            fused_allreduce_gradients(list(model.parameters()), None)
+
             optimizer.step()
             lr_scheduler.step()
             optimizer.clear_grad()
