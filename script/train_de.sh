@@ -1,7 +1,7 @@
 
 export PYTHONPATH="/home/tianxin04/PaddleNLP/"
 PYTHON_BIN="/usr/local/bin/python3.7"
-train_data="./train_data/marco_merge_de2_denoise.tsv.std"
+train_data="./data_train/marco_merge_de2_denoise.tsv.std"
 
 # ${PYTHON_BIN} -u -m paddle.distributed.launch --gpus "0" \
 #bs=512
@@ -12,9 +12,12 @@ p_max_len=128
 warmup_proportion=0.1
 epoch=10
 
-export CUDA_VISIBLE_DEVICES=7
-${PYTHON_BIN} -u \
-    ./src/train_de.py \
+#export CUDA_VISIBLE_DEVICES=7
+#${PYTHON_BIN} -u \
+
+#${PYTHON_BIN} -u -m paddle.distributed.launch --gpus "4,5,6,7" --log_dir "logs" \
+${PYTHON_BIN} -u -m paddle.distributed.launch --gpus "7" --log_dir "logs" \
+    train_de.py \
     --device gpu \
     --save_dir ./checkpoints/ \
     --batch_size ${bs} \
