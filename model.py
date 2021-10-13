@@ -60,7 +60,6 @@ class DualEncoder(nn.Layer):
         if self.output_emb_size is not None and self.output_emb_size > 0:
             cls_embedding = self.emb_reduce_linear(cls_embedding)
         cls_embedding = self.dropout(cls_embedding)
-        cls_embedding = F.normalize(cls_embedding, p=2, axis=-1)
 
         return cls_embedding
 
