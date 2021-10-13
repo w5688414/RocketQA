@@ -59,7 +59,7 @@ class DualEncoder(nn.Layer):
 
         if self.output_emb_size is not None and self.output_emb_size > 0:
             cls_embedding = self.emb_reduce_linear(cls_embedding)
-        cls_embedding = self.dropout(cls_embedding)
+        #cls_embedding = self.dropout(cls_embedding)
 
         return cls_embedding
 
@@ -145,6 +145,8 @@ class DualEncoder(nn.Layer):
         # multiply
         logits = paddle.matmul(
             query_cls_embedding, all_title_cls_embedding, transpose_y=True)
+        #print("logits:{}".format(logits.shape))
+        #print(logits)
 
         # substract margin from all positive samples cosine_sim()
         # margin_diag = paddle.full(
@@ -167,8 +169,11 @@ class DualEncoder(nn.Layer):
             batch_size * self.rank * 2,
             batch_size * (self.rank * 2 + 1),
             dtype='int64')
+        #print("labels:{}".format(labels.shape))
+        #print(labels)
         labels = paddle.reshape(labels, shape=[-1, 1])
 
+        accuracy = paddle.metric.accuracy(input=logits, label=labels)
         loss = F.cross_entropy(input=logits, label=labels)
 
-        return loss
+        return loss, accuracy

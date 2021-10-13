@@ -140,6 +140,8 @@ def do_train():
 
     global_step = 0
     tic_train = time.time()
+
+    avg_loss = 0.0
     for epoch in range(1, args.epochs + 1):
         for step, batch in enumerate(train_data_loader, start=1):
             (query_input_ids, query_token_type_ids, pos_title_input_ids,
@@ -148,19 +150,21 @@ def do_train():
 
             # skip gradient synchronization by 'no_sync'
             with model.no_sync():
-                loss = model(
+                loss, accuracy = model(
                     query_input_ids=query_input_ids,
                     pos_title_input_ids=pos_title_input_ids,
                     neg_title_input_ids=neg_title_input_ids,
                     query_token_type_ids=query_token_type_ids,
                     pos_title_token_type_ids=pos_title_token_type_ids,
                     neg_title_token_type_ids=neg_title_token_type_ids)
+                avg_loss += loss
 
                 global_step += 1
                 if global_step % 10 == 0:
                     print(
-                        "global step %d, epoch: %d, batch: %d, loss: %.5f, speed: %.2f step/s"
+                        "global step %d, epoch: %d, batch: %d, loss: %.2f, avg_loss: %d, accuracy:%.2f, speed: %.2f step/s"
                         % (global_step, epoch, step, loss,
+                           avg_loss / global_step, 100 * accuracy,
                            10 / (time.time() - tic_train)))
                     tic_train = time.time()
                 loss.backward()
@@ -178,6 +182,13 @@ def do_train():
                 save_param_path = os.path.join(save_dir, 'model_state.pdparams')
                 paddle.save(model.state_dict(), save_param_path)
                 tokenizer.save_pretrained(save_dir)
+
+    save_dir = os.path.join(args.save_dir, "model_%d" % global_step)
+    if not os.path.exists(save_dir):
+        os.makedirs(save_dir)
+    save_param_path = os.path.join(save_dir, 'model_state.pdparams')
+    paddle.save(model.state_dict(), save_param_path)
+    tokenizer.save_pretrained(save_dir)
 
 
 if __name__ == "__main__":
