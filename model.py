@@ -78,29 +78,21 @@ class DualEncoder(nn.Layer):
 
     def cosine_sim(self,
                    query_input_ids,
-                   pos_title_input_ids,
-                   neg_title_input_ids,
+                   title_input_ids,
                    query_token_type_ids=None,
                    query_position_ids=None,
                    query_attention_mask=None,
-                   pos_title_token_type_ids=None,
-                   pos_title_position_ids=None,
-                   pos_title_attention_mask=None,
-                   neg_title_token_type_ids=None,
-                   neg_title_position_ids=None,
-                   neg_title_attention_mask=None):
+                   title_token_type_ids=None,
+                   title_position_ids=None,
+                   title_attention_mask=None):
 
         query_cls_embedding = self.get_pooled_embedding(
             query_input_ids, query_token_type_ids, query_position_ids,
             query_attention_mask)
 
-        pos_title_cls_embedding = self.get_pooled_embedding(
-            pos_title_input_ids, pos_title_token_type_ids,
-            pos_title_position_ids, pos_title_attention_mask)
-
-        neg_title_cls_embedding = self.get_pooled_embedding(
-            neg_title_input_ids, neg_title_token_type_ids,
-            neg_title_position_ids, neg_title_attention_mask)
+        title_cls_embedding = self.get_pooled_embedding(
+            title_input_ids, title_token_type_ids, title_position_ids,
+            title_attention_mask)
 
         cosine_sim = paddle.sum(query_cls_embedding * title_cls_embedding,
                                 axis=-1)
@@ -145,8 +137,6 @@ class DualEncoder(nn.Layer):
         # multiply
         logits = paddle.matmul(
             query_cls_embedding, all_title_cls_embedding, transpose_y=True)
-        #print("logits:{}".format(logits.shape))
-        #print(logits)
 
         # substract margin from all positive samples cosine_sim()
         # margin_diag = paddle.full(
@@ -169,8 +159,6 @@ class DualEncoder(nn.Layer):
             batch_size * self.rank * 2,
             batch_size * (self.rank * 2 + 1),
             dtype='int64')
-        #print("labels:{}".format(labels.shape))
-        #print(labels)
         labels = paddle.reshape(labels, shape=[-1, 1])
 
         accuracy = paddle.metric.accuracy(input=logits, label=labels)
