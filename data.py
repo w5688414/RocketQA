@@ -119,6 +119,8 @@ def convert_inference_example(example, tokenizer, max_seq_length=128):
     text_token_type_ids = encoded_inputs["token_type_ids"]
 
     result = [text_input_ids, text_token_type_ids]
+    #print("text_input_ids:{}".format(text_input_ids))
+    #print("text_token_type_ids:{}".format(text_token_type_ids))
 
     return result
 

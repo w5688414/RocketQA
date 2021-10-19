@@ -30,7 +30,7 @@ from paddlenlp.transformers import LinearDecayWithWarmup
 from paddle.distributed.fleet.utils.hybrid_parallel_util import fused_allreduce_gradients
 
 from model import DualEncoder
-from data import read_train_data, convert_example, create_dataloader
+from data import read_train_data, convert_train_example, create_dataloader
 
 # yapf: disable
 parser = argparse.ArgumentParser()
@@ -91,7 +91,7 @@ def do_train():
         'ernie-2.0-en')
 
     trans_func = partial(
-        convert_example,
+        convert_train_example,
         tokenizer=tokenizer,
         query_max_seq_length=args.query_max_seq_length,
         title_max_seq_length=args.title_max_seq_length)
@@ -162,7 +162,7 @@ def do_train():
                 global_step += 1
                 if global_step % 10 == 0:
                     print(
-                        "global step %d, epoch: %d, batch: %d, loss: %.2f, avg_loss: %d, accuracy:%.2f, speed: %.2f step/s"
+                        "global step %d, epoch: %d, batch: %d, loss: %.2f, avg_loss: %.2f, accuracy:%.2f, speed: %.2f step/s"
                         % (global_step, epoch, step, loss,
                            avg_loss / global_step, 100 * accuracy,
                            10 / (time.time() - tic_train)))

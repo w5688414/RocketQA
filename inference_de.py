@@ -108,14 +108,28 @@ if __name__ == "__main__":
 
     if args.params_path and os.path.isfile(args.params_path):
         state_dict = paddle.load(args.params_path)
+        #print("paddle_load state_dict:{}".format(state_dict))
+        #print("model state_dict before set_dict:{}".format(model.state_dict()))
+
         model.set_dict(state_dict)
+
+        #print("model state_dict after set_dict:{}".format(model.state_dict()))
         print("Loaded parameters from %s" % args.params_path)
+        #for name, param in model.named_parameters():
+        #    print("{}:{}".format(name, param.shape))
+        #    if name == "ernie.embeddings.word_embeddings.weight":
+        #        print("{}:{}".format("101 embedding", param[101, :20]))
+        #        print("embeding {}:{}".format(name, param))
+        #    # print("{}:{}".format(name, param))
     else:
         raise ValueError(
             "Please set --params_path with correct pretrained model file")
 
     embeddings = predict(model, valid_data_loader)
+    print("final embedding:{}".format(embeddings[0, :20]))
+    """
     with open(args.output_file + '.npy', 'wb') as f:
         np.save(f, np.array(embeddings))
         print("succeed save {} array to output file".format(
             np.array(embeddings).shape))
+   """

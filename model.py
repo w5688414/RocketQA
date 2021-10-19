@@ -29,7 +29,7 @@ class DualEncoder(nn.Layer):
                  output_emb_size=None,
                  use_cross_batch=False):
         super().__init__()
-        self.ptm = pretrained_model
+        self.ernie = pretrained_model
         self.dropout = nn.Dropout(dropout if dropout is not None else 0.1)
 
         # if output_emb_size is not None, then add Linear layer to reduce embedding_size, 
@@ -54,8 +54,8 @@ class DualEncoder(nn.Layer):
                              token_type_ids=None,
                              position_ids=None,
                              attention_mask=None):
-        _, cls_embedding = self.ptm(input_ids, token_type_ids, position_ids,
-                                    attention_mask)
+        _, cls_embedding = self.ernie(input_ids, token_type_ids, position_ids,
+                                      attention_mask)
 
         if self.output_emb_size is not None and self.output_emb_size > 0:
             cls_embedding = self.emb_reduce_linear(cls_embedding)
