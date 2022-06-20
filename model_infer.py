@@ -1,6 +1,6 @@
 # Copyright (c) 2021 PaddlePaddle Authors. All Rights Reserved.
 #
-# Licensed under the Apache License, Version 2.0 (the "License");
+# Licensed under the Apache License, Version 2.0 (the "License"
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
 #
@@ -12,124 +12,166 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from functools import partial
-import argparse
+import abc
 import sys
-import os
-import random
-import time
 
 import numpy as np
-from tqdm import tqdm 
+
 import paddle
+import paddle.nn as nn
 import paddle.nn.functional as F
-import paddlenlp as ppnlp
-from paddlenlp.datasets import load_dataset
-from paddlenlp.data import Stack, Tuple, Pad
-
-from data import read_text, convert_inference_example, create_dataloader, read_dev_text, read_passage_text
-from model_infer import DualEncoderInfer
-
-# yapf: disable
-parser = argparse.ArgumentParser()
-parser.add_argument("--text_file", type=str, required=True, help="The full path of input file")
-parser.add_argument("--output_file", default="output", type=str, required=True, help="The full path of output file to save text embedddings")
-parser.add_argument("--params_path", type=str, required=True, help="The path to model parameters to be loaded.")
-parser.add_argument("--max_seq_length", default=64, type=int, help="The maximum total input sequence length after tokenization. "
-    "Sequences longer than this will be truncated, sequences shorter will be padded.")
-parser.add_argument("--batch_size", default=32, type=int, help="Batch size per GPU/CPU for training.")
-parser.add_argument("--output_emb_size", default=None, type=int, help="output_embedding_size")
-parser.add_argument('--device', choices=['cpu', 'gpu'], default="gpu", help="Select which device to train model, defaults to gpu.")
-parser.add_argument("--pad_to_max_seq_len", action="store_true", help="Whether to pad to max seq length.")
-args = parser.parse_args()
-# yapf: enable
-
-def predict(model, data_loader):
-    """
-    Predicts the data labels.
-
-    Args:
-        model (obj:`DualEncoder`): A model to extract text embedding or calculate similarity of text pair.
-        data_loaer (obj:`List(Example)`): The processed data ids of text pair: [query_input_ids, query_token_type_ids, title_input_ids, title_token_type_ids]
-    Returns:
-        results(obj:`List`): cosine similarity of text pairs.
-    """
-
-    embeddings = []
-
-    model.eval()
-
-    with paddle.no_grad():
-        for batch_data in tqdm(data_loader):
-            text_input_ids, text_token_type_ids = batch_data
-            batch_embedding = model.get_cls_output(
-                text_input_ids, text_token_type_ids)
-
-            embeddings.append(batch_embedding.numpy())
-
-        embeddings = np.concatenate(embeddings, axis=0)
-
-        return embeddings
 
 
-if __name__ == "__main__":
-    paddle.set_device(args.device)
-    model_name_or_path = 'ernie-1.0'
-    tokenizer = ppnlp.transformers.ErnieTokenizer.from_pretrained(
-        model_name_or_path)
+class DualEncoderInfer(nn.Layer):
+    def __init__(self,
+                 pretrained_model,
+                 dropout=None,
+                 output_emb_size=None,
+                 use_cross_batch=False):
+        super().__init__()
+        self.ernie = pretrained_model
+        self.dropout = nn.Dropout(dropout if dropout is not None else 0.1)
 
-    trans_func = partial(
-        convert_inference_example,
-        tokenizer=tokenizer,
-        max_seq_length=args.max_seq_length)
+        # if output_emb_size is not None, then add Linear layer to reduce embedding_size, 
+        # we recommend set output_emb_size = 256 considering the trade-off beteween 
+        # recall performance and efficiency
 
-    batchify_fn = lambda samples, fn=Tuple(
-        Pad(axis=0, pad_val=tokenizer.pad_token_id,dtype='int64'),  # query_input
-        Pad(axis=0, pad_val=tokenizer.pad_token_type_id,dtype='int64'),  # query_segment
-    ): [data for data in fn(samples)]
+        self.output_emb_size = output_emb_size
+        if output_emb_size is not None and output_emb_size > 0:
+            weight_attr = paddle.ParamAttr(
+                initializer=paddle.nn.initializer.TruncatedNormal(std=0.02))
+            self.emb_reduce_linear = paddle.nn.Linear(
+                768, output_emb_size, weight_attr=weight_attr)
 
-    valid_ds = load_dataset(read_dev_text, data_path=args.text_file, lazy=False)
-    param_name = args.text_file.split('/')[-1]
+        self.use_cross_batch = use_cross_batch
+        if self.use_cross_batch:
+            self.rank = paddle.distributed.get_rank()
+        else:
+            self.rank = 0
 
-    valid_data_loader = create_dataloader(
-        valid_ds,
-        mode='predict',
-        batch_size=args.batch_size,
-        batchify_fn=batchify_fn,
-        trans_fn=trans_func)
+    def get_cls_output(self,
+                            input_ids,
+                            token_type_ids=None,
+                            position_ids=None,
+                            attention_mask=None):
+        sequence_output, cls_embedding = self.ernie(input_ids, token_type_ids, position_ids,
+                                      attention_mask)
+        cls_embedding = sequence_output[:, 0]
+        # cls_embedding = self.dropout(cls_embedding)
+        return cls_embedding
+        
 
-    pretrained_model = ppnlp.transformers.ErnieModel.from_pretrained(
-        model_name_or_path)
+    def get_pooled_embedding(self,
+                             input_ids,
+                             token_type_ids=None,
+                             position_ids=None,
+                             attention_mask=None):
+        sequence_output, cls_embedding = self.ernie(input_ids, token_type_ids, position_ids,
+                                      attention_mask)
 
-    model = DualEncoderInfer(pretrained_model, output_emb_size=args.output_emb_size)
+        if self.output_emb_size is not None and self.output_emb_size > 0:
+            cls_embedding = self.emb_reduce_linear(cls_embedding)
+        
+        # cls_embedding = self.dropout(cls_embedding)
+        return cls_embedding
 
-    if args.params_path and os.path.isfile(args.params_path):
-        state_dict = paddle.load(args.params_path)
-        print("paddle_load state_dict:{}".format(state_dict.keys()))
-        # print(model.state_dict().keys())
-        new_dict = {}
-        for name,value in state_dict.items():
-            new_dict['ernie.'+name]=value
+    def get_semantic_embedding(self, data_loader):
+        self.eval()
+        with paddle.no_grad():
+            for batch_data in data_loader:
+                input_ids, token_type_ids = batch_data
 
-        weight_name = 'ernie.encoder.layers.11.norm1.weight'
-        print("model state_dict before set_dict:{}".format(model.state_dict()[weight_name]))
-        # print(new_dict[weight_name])
-        model.set_dict(new_dict)
+                text_embeddings = self.get_cls_output(
+                    input_ids, token_type_ids=token_type_ids)
 
-        print("model state_dict after set_dict:{}".format(model.state_dict()[weight_name]))
-        print("Loaded parameters from %s" % args.params_path)
-        #for name, param in model.named_parameters():
-        #    print("{}:{}".format(name, param.shape))
-        #    if name == "ernie.embeddings.word_embeddings.weight":
-        #        print("{}:{}".format("101 embedding", param[101, :20]))
-        #        print("embeding {}:{}".format(name, param))
-        #    # print("{}:{}".format(name, param))
-    else:
-        raise ValueError(
-            "Please set --params_path with correct pretrained model file")
+                yield text_embeddings
 
-    embeddings = predict(model, valid_data_loader)
-    print("final embedding:{}".format(embeddings[0, :20]))
-    print(embeddings.shape)
-    np.save('./output/{}'.format(param_name),np.array(embeddings))
+    def cosine_sim(self,
+                   query_input_ids,
+                   title_input_ids,
+                   query_token_type_ids=None,
+                   query_position_ids=None,
+                   query_attention_mask=None,
+                   title_token_type_ids=None,
+                   title_position_ids=None,
+                   title_attention_mask=None):
 
+        query_cls_embedding = self.get_cls_output(
+            query_input_ids, query_token_type_ids, query_position_ids,
+            query_attention_mask)
+
+        title_cls_embedding = self.get_cls_output(
+            title_input_ids, title_token_type_ids, title_position_ids,
+            title_attention_mask)
+
+        cosine_sim = paddle.sum(query_cls_embedding * title_cls_embedding,
+                                axis=-1)
+        return cosine_sim
+
+    def forward(self,
+                query_input_ids,
+                pos_title_input_ids,
+                neg_title_input_ids,
+                query_token_type_ids=None,
+                query_position_ids=None,
+                query_attention_mask=None,
+                pos_title_token_type_ids=None,
+                pos_title_position_ids=None,
+                pos_title_attention_mask=None,
+                neg_title_token_type_ids=None,
+                neg_title_position_ids=None,
+                neg_title_attention_mask=None):
+
+        query_cls_embedding = self.get_cls_output(
+            query_input_ids, query_token_type_ids, query_position_ids,
+            query_attention_mask)
+
+        pos_title_cls_embedding = self.get_cls_output(
+            pos_title_input_ids, pos_title_token_type_ids,
+            pos_title_position_ids, pos_title_attention_mask)
+
+        neg_title_cls_embedding = self.get_cls_output(
+            neg_title_input_ids, neg_title_token_type_ids,
+            neg_title_position_ids, neg_title_attention_mask)
+
+        all_title_cls_embedding = paddle.concat(
+            x=[pos_title_cls_embedding, neg_title_cls_embedding], axis=0)
+        #print("title cls_emb shape:{}".format(all_title_cls_embedding.shape))
+
+        if self.use_cross_batch:
+            tensor_list = []
+            paddle.distributed.all_gather(tensor_list, all_title_cls_embedding)
+            all_title_cls_embedding = paddle.concat(x=tensor_list, axis=0)
+            #print("gathered title cls_emb shape:{}".format(all_title_cls_embedding.shape))
+
+        # multiply
+        logits = paddle.matmul(
+            query_cls_embedding, all_title_cls_embedding, transpose_y=True)
+
+        # substract margin from all positive samples cosine_sim()
+        # margin_diag = paddle.full(
+        #     shape=[query_cls_embedding.shape[0]],
+        #     fill_value=self.margin,
+        #     dtype=paddle.get_default_dtype())
+
+        # cosine_sim = cosine_sim - paddle.diag(margin_diag)
+        # # scale cosine to ease training converge
+        # cosine_sim *= self.sacle
+
+        #all_labels = np.array(range(batch_size * worker_id * 2, batch_size * (worker_id * 2 + 1)), dtype='int64')
+
+        batch_size = query_cls_embedding.shape[0]
+
+        # self.rank = 0
+        #print("local rank:{}".format(self.rank))
+        #print("label range:{} \t {}".format(batch_size * self.rank * 2, batch_size * (self.rank * 2 + 1)))
+        labels = paddle.arange(
+            batch_size * self.rank * 2,
+            batch_size * (self.rank * 2 + 1),
+            dtype='int64')
+        labels = paddle.reshape(labels, shape=[-1, 1])
+
+        accuracy = paddle.metric.accuracy(input=logits, label=labels)
+        loss = F.cross_entropy(input=logits, label=labels)
+
+        return loss, accuracy
