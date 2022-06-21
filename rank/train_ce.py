@@ -24,8 +24,8 @@ import paddle
 import paddle.nn.functional as F
 from paddlenlp.data import Stack, Tuple, Pad
 from paddlenlp.datasets import load_dataset
-from paddlenlp.transformers import AutoModelForSequenceClassification, AutoTokenizer,AutoModel
-from paddlenlp.transformers import LinearDecayWithWarmup,PolyDecayWithWarmup
+from paddlenlp.transformers import  AutoTokenizer,AutoModel
+from paddlenlp.transformers import PolyDecayWithWarmup
 from paddle.distributed.fleet.utils.hybrid_parallel_util import fused_allreduce_gradients
 from model import CrossEncoder
 from utils import convert_example, read_train_set, create_dataloader
@@ -99,11 +99,6 @@ def do_train():
         model.set_dict(state_dict)
     model = paddle.DataParallel(model)
 
-    # num_training_steps = len(train_data_loader) * args.epochs
-
-    # lr_scheduler = LinearDecayWithWarmup(args.learning_rate, num_training_steps,
-    #                                      args.warmup_proportion)
-
     num_training_examples = len(train_ds)
     # 4卡 gpu
     max_train_steps = args.epochs * num_training_examples // args.batch_size // dev_count
@@ -114,9 +109,6 @@ def do_train():
     print("Num train examples: %d" % num_training_examples)
     print("Max train steps: %d" % max_train_steps)
     print("Num warmup steps: %d" % warmup_steps)
-
-    # lr_scheduler = LinearDecayWithWarmup(args.learning_rate, max_train_steps,
-    #                                      warmup_steps)
     
     lr_scheduler = PolyDecayWithWarmup(args.learning_rate,max_train_steps,warmup_steps,lr_end=0.0,power=1.0)
 
@@ -149,17 +141,7 @@ def do_train():
             metric.update(correct)
             acc = metric.accumulate()
             loss.backward()
-            # with model.no_sync():
-            #     logits = model(input_ids, token_type_ids)
-            #     loss = criterion(logits, labels)
-            #     probs = F.softmax(logits, axis=1)
-            #     correct = metric.compute(probs, labels)
-            #     metric.update(correct)
-            #     acc = metric.accumulate()
-            #     loss.backward()
 
-            # step 2 : fuse + allreduce manually before optimization
-            # fused_allreduce_gradients(list(model.parameters()), None)
             optimizer.step()
             lr_scheduler.step()
             optimizer.clear_grad()

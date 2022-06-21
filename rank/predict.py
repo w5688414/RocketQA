@@ -21,7 +21,7 @@ import paddle.nn.functional as F
 from paddlenlp.datasets import load_dataset
 from paddlenlp.data import Stack, Tuple, Pad
 from tqdm import tqdm 
-from paddlenlp.transformers import AutoModelForSequenceClassification, AutoTokenizer,AutoModel
+from paddlenlp.transformers import AutoTokenizer,AutoModel
 
 from utils import convert_example, read_train_set, create_dataloader
 from model import CrossEncoder
@@ -39,21 +39,6 @@ args = parser.parse_args()
 
 
 def predict(model, data_loader):
-    """
-    Predicts the data labels.
-
-    Args:
-        model (obj:`paddle.nn.Layer`): A model to classify texts.
-        data (obj:`List(Example)`): The processed data whose each element is a Example (numedtuple) object.
-            A Example object contains `text`(word_ids) and `seq_len`(sequence length).
-        tokenizer(obj:`PretrainedTokenizer`): This tokenizer inherits from :class:`~paddlenlp.transformers.PretrainedTokenizer` 
-            which contains most of the methods. Users should refer to the superclass for more information regarding methods.
-        label_map(obj:`dict`): The label id (key) to label str (value) map.
-        batch_size(obj:`int`, defaults to 1): The number of batch.
-
-    Returns:
-        results(obj:`dict`): All the predictions labels.
-    """
     results = []
     model.eval()
     with paddle.no_grad():
@@ -61,11 +46,8 @@ def predict(model, data_loader):
             input_ids, token_type_ids,label = batch
             logits = model(input_ids, token_type_ids)
             loss, probs = F.softmax_with_cross_entropy(logits=logits, label=label,return_softmax=True)
-            # probs = F.softmax(logits, axis=1).numpy()
-            # print(probs)
             probs = probs.numpy()
             results.extend(probs[:, 1])
-            # break
     return results
 
 
@@ -99,13 +81,9 @@ if __name__ == "__main__":
         batchify_fn=batchify_fn,
         trans_fn=trans_func)
 
-
     if args.params_path and os.path.isfile(args.params_path):
         state_dict = paddle.load(args.params_path)
-        # print(state_dict['ernie.embeddings.word_embeddings.weight'])
-        print(model.state_dict()['classifier.weight'])
         model.set_dict(state_dict)
-        print(model.state_dict()['classifier.weight'])
         print("Loaded parameters from %s" % args.params_path)
 
     results = predict(model, test_data_loader)
@@ -113,7 +91,3 @@ if __name__ == "__main__":
     for score in results:
         print(score)
         file.write(str(score)+'\n')
-    #test_ds = load_dataset(read_test_set, data_path=args.test_set, lazy=False)
-    #for idx, text in enumerate(test_ds):
-        #print('data: {} \t prob: {}'.format(text, results[idx]))
-        #print(results[idx])
