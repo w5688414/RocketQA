@@ -26,7 +26,7 @@ from paddlenlp.data import Stack, Tuple, Pad
 from paddlenlp.datasets import load_dataset
 from paddlenlp.transformers import AutoModelForSequenceClassification, AutoTokenizer,AutoModel
 from paddlenlp.transformers import LinearDecayWithWarmup
-
+from paddle.distributed.fleet.utils.hybrid_parallel_util import fused_allreduce_gradients
 from model import CrossEncoder
 from utils import convert_example, read_train_set, create_dataloader
 
@@ -109,14 +109,15 @@ def do_train():
     max_train_steps = args.epochs * num_training_examples // args.batch_size // dev_count
     
     warmup_steps = int(max_train_steps * args.warmup_proportion)
-    lr_scheduler = LinearDecayWithWarmup(args.learning_rate, max_train_steps,
-                                         warmup_steps)
-
 
     print("Device count: %d" % dev_count)
     print("Num train examples: %d" % num_training_examples)
     print("Max train steps: %d" % max_train_steps)
     print("Num warmup steps: %d" % warmup_steps)
+
+    lr_scheduler = LinearDecayWithWarmup(args.learning_rate, max_train_steps,
+                                         warmup_steps)
+    
 
     # Generate parameter names needed to perform weight decay.
     # All bias and LayerNorm parameters are excluded.
@@ -130,7 +131,7 @@ def do_train():
         weight_decay=args.weight_decay,
         apply_decay_param_fun=lambda x: x in decay_params)
 
-    criterion = paddle.nn.loss.CrossEntropyLoss(reduction='mean')
+    criterion = paddle.nn.loss.CrossEntropyLoss()
     metric = paddle.metric.Accuracy()
     if args.use_amp:
         scaler = paddle.amp.GradScaler(init_loss_scaling=args.scale_loss)
@@ -139,30 +140,25 @@ def do_train():
     for epoch in range(1, args.epochs + 1):
         for step, batch in enumerate(train_data_loader, start=1):
             input_ids, token_type_ids, labels = batch
-            if global_step == 0:
-                print("input_ids:{}".format(input_ids))
-                print("input_ids0:{}".format(input_ids[0, :]))
-                print("input_ids31:{}".format(input_ids[31, :]))
-                print("token_type_ids:{}".format(token_type_ids))
-                print("token_type_ids0:{}".format(token_type_ids[0, :]))
-                print("token_type_ids31:{}".format(token_type_ids[31, :]))
-                print("labels:{}".format(labels))
-            with paddle.amp.auto_cast(
-                    args.use_amp,
-                    custom_white_list=["layer_norm", "softmax", "gelu"], ):
+            # logits = model(input_ids, token_type_ids)
+            # loss = criterion(logits, labels)
+            # probs = F.softmax(logits, axis=1)
+            # correct = metric.compute(probs, labels)
+            # metric.update(correct)
+            # acc = metric.accumulate()
+            # loss.backward()
+            with model.no_sync():
                 logits = model(input_ids, token_type_ids)
                 loss = criterion(logits, labels)
-            probs = F.softmax(logits, axis=1)
-            correct = metric.compute(probs, labels)
-            metric.update(correct)
-            acc = metric.accumulate()
-
-            if args.use_amp:
-                scaler.scale(loss).backward()
-                scaler.minimize(optimizer, loss)
-            else:
+                probs = F.softmax(logits, axis=1)
+                correct = metric.compute(probs, labels)
+                metric.update(correct)
+                acc = metric.accumulate()
                 loss.backward()
-                optimizer.step()
+
+            # step 2 : fuse + allreduce manually before optimization
+            fused_allreduce_gradients(list(model.parameters()), None)
+            optimizer.step()
             lr_scheduler.step()
             optimizer.clear_grad()
 
@@ -177,15 +173,15 @@ def do_train():
 
             if global_step % args.save_steps == 0 and rank == 0:
                 save_dir = os.path.join(args.save_dir, "model_%d" % global_step)
-                if not os.path.exists(save_dir):
-                    os.makedirs(save_dir)
-                model._layers.save_pretrained(save_dir)
+                # model._layers.save_pretrained(save_dir)
+                paddle.save(model.state_dict(),os.path.join(save_dir,'model_state.pdparams'))
                 tokenizer.save_pretrained(save_dir)
                 tic_train = time.time()
 
     # save final checkpoint
     save_dir = os.path.join(args.save_dir, "model_%d" % global_step)
-    model._layers.save_pretrained(save_dir)
+    paddle.save(model.state_dict(),os.path.join(save_dir,'model_state.pdparams'))
+    # model._layers.save_pretrained(save_dir)
     tokenizer.save_pretrained(save_dir)
 
 
