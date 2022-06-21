@@ -13,9 +13,6 @@ train_exampls=`cat $TRAIN_SET | wc -l`
 save_steps=$[$train_exampls/$batch_size/$node]
 new_save_steps=$[$save_steps*$epoch/2]
 
-#export CUDA_VISIBLE_DEVICES=2,3,4,5
-#python train.py \
-#python -u -m paddle.distributed.launch --gpus "2,3,4,5" train.py \
 python -u -m paddle.distributed.launch --gpus "4,5,6,7" --log_dir="debug_log" train_ce.py \
         --device gpu \
         --train_set ${TRAIN_SET} \
@@ -28,5 +25,5 @@ python -u -m paddle.distributed.launch --gpus "4,5,6,7" --log_dir="debug_log" tr
         --warmup_proportion 0.0 \
         --logging_steps 10 \
         --seed 1 \
-        --epochs ${epoch}
-        > ./log/train.log 2>&1 &
+        --epochs ${epoch} \
+        1>>log/train.log 2>&1
