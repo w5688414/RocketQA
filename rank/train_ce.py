@@ -25,7 +25,7 @@ import paddle.nn.functional as F
 from paddlenlp.data import Stack, Tuple, Pad
 from paddlenlp.datasets import load_dataset
 from paddlenlp.transformers import AutoModelForSequenceClassification, AutoTokenizer,AutoModel
-from paddlenlp.transformers import LinearDecayWithWarmup
+from paddlenlp.transformers import LinearDecayWithWarmup,PolyDecayWithWarmup
 from paddle.distributed.fleet.utils.hybrid_parallel_util import fused_allreduce_gradients
 from model import CrossEncoder
 from utils import convert_example, read_train_set, create_dataloader
@@ -115,9 +115,10 @@ def do_train():
     print("Max train steps: %d" % max_train_steps)
     print("Num warmup steps: %d" % warmup_steps)
 
-    lr_scheduler = LinearDecayWithWarmup(args.learning_rate, max_train_steps,
-                                         warmup_steps)
+    # lr_scheduler = LinearDecayWithWarmup(args.learning_rate, max_train_steps,
+    #                                      warmup_steps)
     
+    lr_scheduler = PolyDecayWithWarmup(args.learning_rate,max_train_steps,warmup_steps,lr_end=0.0,power=1.0)
 
     # Generate parameter names needed to perform weight decay.
     # All bias and LayerNorm parameters are excluded.
@@ -129,7 +130,8 @@ def do_train():
         learning_rate=lr_scheduler,
         parameters=model.parameters(),
         weight_decay=args.weight_decay,
-        apply_decay_param_fun=lambda x: x in decay_params)
+        apply_decay_param_fun=lambda x: x in decay_params,
+        grad_clip=paddle.nn.ClipGradByGlobalNorm(1.0))
 
     criterion = paddle.nn.loss.CrossEntropyLoss()
     metric = paddle.metric.Accuracy()
@@ -140,30 +142,31 @@ def do_train():
     for epoch in range(1, args.epochs + 1):
         for step, batch in enumerate(train_data_loader, start=1):
             input_ids, token_type_ids, labels = batch
-            # logits = model(input_ids, token_type_ids)
-            # loss = criterion(logits, labels)
-            # probs = F.softmax(logits, axis=1)
-            # correct = metric.compute(probs, labels)
-            # metric.update(correct)
-            # acc = metric.accumulate()
-            # loss.backward()
-            with model.no_sync():
-                logits = model(input_ids, token_type_ids)
-                loss = criterion(logits, labels)
-                probs = F.softmax(logits, axis=1)
-                correct = metric.compute(probs, labels)
-                metric.update(correct)
-                acc = metric.accumulate()
-                loss.backward()
+            logits = model(input_ids, token_type_ids)
+            loss = criterion(logits, labels)
+            probs = F.softmax(logits, axis=1)
+            correct = metric.compute(probs, labels)
+            metric.update(correct)
+            acc = metric.accumulate()
+            loss.backward()
+            # with model.no_sync():
+            #     logits = model(input_ids, token_type_ids)
+            #     loss = criterion(logits, labels)
+            #     probs = F.softmax(logits, axis=1)
+            #     correct = metric.compute(probs, labels)
+            #     metric.update(correct)
+            #     acc = metric.accumulate()
+            #     loss.backward()
 
             # step 2 : fuse + allreduce manually before optimization
-            fused_allreduce_gradients(list(model.parameters()), None)
+            # fused_allreduce_gradients(list(model.parameters()), None)
             optimizer.step()
             lr_scheduler.step()
             optimizer.clear_grad()
 
             global_step += 1
             if global_step % args.logging_steps == 0 and rank == 0:
+                print("learning_rate: %f" %(lr_scheduler.get_lr()))
                 time_diff = time.time() - tic_train
                 print(
                     "global step %d, epoch: %d, batch: %d, loss: %.5f, accuracy: %.5f, speed: %.2f step/s"

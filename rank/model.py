@@ -46,6 +46,6 @@ class CrossEncoder(nn.Layer):
                                       position_ids=position_ids,
                                       attention_mask=attention_mask)
 
-        # pooled_output = self.dropout(pooled_output)
+        pooled_output = self.dropout(pooled_output)
         logits = self.classifier(pooled_output)
         return logits
