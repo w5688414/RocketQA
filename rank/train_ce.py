@@ -158,7 +158,6 @@ def do_train():
 
             if global_step % args.save_steps == 0 and rank == 0:
                 save_dir = os.path.join(args.save_dir, "model_%d" % global_step)
-                # model._layers.save_pretrained(save_dir)
                 paddle.save(model.state_dict(),os.path.join(save_dir,'model_state.pdparams'))
                 tokenizer.save_pretrained(save_dir)
                 tic_train = time.time()
@@ -166,7 +165,6 @@ def do_train():
     # save final checkpoint
     save_dir = os.path.join(args.save_dir, "model_%d" % global_step)
     paddle.save(model.state_dict(),os.path.join(save_dir,'model_state.pdparams'))
-    # model._layers.save_pretrained(save_dir)
     tokenizer.save_pretrained(save_dir)
 
 
