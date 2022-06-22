@@ -143,7 +143,6 @@ def do_train():
 
             global_step += 1
             if global_step % args.logging_steps == 0 and rank == 0:
-                print("learning_rate: %f" %(lr_scheduler.get_lr()))
                 time_diff = time.time() - tic_train
                 print(
                     "global step %d, epoch: %d, batch: %d, loss: %.5f, accuracy: %.5f, speed: %.2f step/s"
