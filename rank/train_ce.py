@@ -89,7 +89,7 @@ def do_train():
 
     train_data_loader = create_dataloader(
         train_ds,
-        mode='test',
+        mode='train',
         batch_size=args.batch_size,
         batchify_fn=batchify_fn,
         trans_fn=trans_func)
@@ -110,7 +110,6 @@ def do_train():
     print("Max train steps: %d" % max_train_steps)
     print("Num warmup steps: %d" % warmup_steps)
     
-    lr_scheduler = PolyDecayWithWarmup(args.learning_rate,max_train_steps,warmup_steps,lr_end=0.0,power=1.0)
 
     # Generate parameter names needed to perform weight decay.
     # All bias and LayerNorm parameters are excluded.
@@ -119,14 +118,13 @@ def do_train():
         if not any(nd in n for nd in ["bias", "norm"])
     ]
     optimizer = paddle.optimizer.AdamW(
-        learning_rate=lr_scheduler,
+        learning_rate=args.learning_rate,
         parameters=model.parameters(),
         weight_decay=args.weight_decay,
         apply_decay_param_fun=lambda x: x in decay_params,
         grad_clip=paddle.nn.ClipGradByGlobalNorm(1.0))
 
     criterion = paddle.nn.loss.CrossEntropyLoss()
-    metric = paddle.metric.Accuracy()
     if args.use_amp:
         scaler = paddle.amp.GradScaler(init_loss_scaling=args.scale_loss)
     global_step = 0
@@ -137,18 +135,14 @@ def do_train():
             logits = model(input_ids, token_type_ids)
             loss = criterion(logits, labels)
             probs = F.softmax(logits, axis=1)
-            correct = metric.compute(probs, labels)
-            metric.update(correct)
-            acc = metric.accumulate()
+            acc = paddle.metric.accuracy(input=probs, label=labels)
             loss.backward()
 
             optimizer.step()
-            lr_scheduler.step()
             optimizer.clear_grad()
 
             global_step += 1
             if global_step % args.logging_steps == 0 and rank == 0:
-                print("learning_rate: %f" %(lr_scheduler.get_lr()))
                 time_diff = time.time() - tic_train
                 print(
                     "global step %d, epoch: %d, batch: %d, loss: %.5f, accuracy: %.5f, speed: %.2f step/s"
