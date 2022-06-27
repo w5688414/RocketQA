@@ -105,26 +105,16 @@ if __name__ == "__main__":
 
     if args.params_path and os.path.isfile(args.params_path):
         state_dict = paddle.load(args.params_path)
-        # print("paddle_load state_dict:{}".format(state_dict))
         weight_name = 'ernie.encoder.layers.11.norm1.weight'
         print("model state_dict before set_dict:{}".format(model.state_dict()[weight_name]))
-        # print("model state_dict before set_dict:{}".format(model.state_dict()['ernie.pooler.dense.bias']))
         new_dict = {}
         for name,value in state_dict.items():
             new_dict['ernie.'+name]=value
 
         model.set_dict(new_dict)
-
-        # print("model state_dict after set_dict:{}".format(model.state_dict()['ernie.pooler.dense.bias']))
-        
         print("model state_dict before set_dict:{}".format(model.state_dict()[weight_name]))
         print("Loaded parameters from %s" % args.params_path)
-        #for name, param in model.named_parameters():
-        #    print("{}:{}".format(name, param.shape))
-        #    if name == "ernie.embeddings.word_embeddings.weight":
-        #        print("{}:{}".format("101 embedding", param[101, :20]))
-        #        print("embeding {}:{}".format(name, param))
-        #    # print("{}:{}".format(name, param))
+        
     else:
         raise ValueError(
             "Please set --params_path with correct pretrained model file")

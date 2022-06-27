@@ -26,7 +26,7 @@ import paddle.nn.functional as F
 import paddlenlp as ppnlp
 from paddlenlp.data import Stack, Tuple, Pad
 from paddlenlp.datasets import load_dataset
-from paddlenlp.transformers import LinearDecayWithWarmup
+from paddlenlp.transformers import LinearDecayWithWarmup, PolyDecayWithWarmup
 from paddle.distributed.fleet.utils.hybrid_parallel_util import fused_allreduce_gradients
 
 from model import DualEncoder
@@ -49,6 +49,7 @@ parser.add_argument("--init_from_ckpt", type=str, default=None, help="The path o
 parser.add_argument("--seed", type=int, default=1000, help="random seed for initialization")
 parser.add_argument('--device', choices=['cpu', 'gpu'], default="gpu", help="Select which device to train model, defaults to gpu.")
 parser.add_argument('--save_steps', type=int, default=10000, help="Inteval steps to save checkpoint")
+parser.add_argument('--log_steps', type=int, default=100, help="Inteval steps to save checkpoint")
 parser.add_argument("--train_set_file", type=str, required=True, help="The full path of train_set_file")
 parser.add_argument("--use_cross_batch",  action="store_true", help="Whether to use cross-batch for training.")
 parser.add_argument(
@@ -56,7 +57,6 @@ parser.add_argument(
         action='store_true',
         help='Whether to use float16(Automatic Mixed Precision) to train.')
 parser.add_argument("--scale_loss", type=float, default=102400, help="The value of scale_loss for fp16. This is only used for AMP training.")
-
 
 args = parser.parse_args()
 # yapf: enable
@@ -134,11 +134,7 @@ def do_train():
     print("Max train steps: %d" % max_train_steps)
     print("Num warmup steps: %d" % warmup_steps)
 
-    
-    # lr_scheduler = LinearDecayWithWarmup(args.learning_rate, num_training_steps,
-    #                                      args.warmup_proportion)
-    lr_scheduler = LinearDecayWithWarmup(args.learning_rate, max_train_steps,
-                                         warmup_steps)
+    lr_scheduler = PolyDecayWithWarmup(args.learning_rate,max_train_steps,warmup_steps,lr_end=0.0,power=1.0)
 
     # Generate parameter names needed to perform weight decay.
     # All bias and LayerNorm parameters are excluded.
@@ -150,7 +146,8 @@ def do_train():
         learning_rate=lr_scheduler,
         parameters=model.parameters(),
         weight_decay=args.weight_decay,
-        apply_decay_param_fun=lambda x: x in decay_params)
+        apply_decay_param_fun=lambda x: x in decay_params,
+        grad_clip=paddle.nn.ClipGradByGlobalNorm(1.0))
 
     if args.use_amp:
         scaler = paddle.amp.GradScaler(init_loss_scaling=args.scale_loss,
@@ -188,10 +185,10 @@ def do_train():
                     avg_loss += loss
 
                     global_step += 1
-                    if global_step % 10 == 0:
+                    if global_step % args.log_steps == 0:
                         print("learning_rate: %f" %(lr_scheduler.get_lr()))
                         print(
-                            "global step %d, epoch: %d, batch: %d, loss: %.2f, avg_loss: %.2f, accuracy:%.2f, speed: %.2f step/s"
+                            "global step %d, epoch: %d, batch: %d, loss: %.5f, avg_loss: %.5f, accuracy:%.5f, speed: %.5f step/s"
                             % (global_step, epoch, step, loss,
                             avg_loss / global_step, 100 * accuracy,
                             10 / (time.time() - tic_train)))
@@ -240,7 +237,6 @@ def do_train():
     save_param_path = os.path.join(save_dir, 'title_model_state.pdparams')
     paddle.save(title_model.state_dict(), save_param_path)
     tokenizer.save_pretrained(save_dir)
-
 
 if __name__ == "__main__":
     do_train()

@@ -3,9 +3,7 @@ set -x
 
 export FLAGS_eager_delete_tensor_gb=0
 export FLAGS_sync_nccl_allreduce=1
-# export FLAGS_fraction_of_gpu_memory_to_use=0.95
-
-# export GLOG_v=1
+export FLAGS_fraction_of_gpu_memory_to_use=0.95
 
 TRAIN_SET="dureader-retrieval-baseline-dataset/train/dual.train.tsv"
 python -u -m paddle.distributed.launch --gpus "0,1,2,3" \

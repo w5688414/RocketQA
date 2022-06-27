@@ -94,9 +94,6 @@ def convert_train_example(example,
         text="",
         text_pair=tokens_title_pos+tokens_para_pos,
         max_seq_len=title_max_seq_length)
-    # print(example["pos_title"])
-    # print(example["pos_para"])
-    # print(encoded_inputs)
     pos_title_input_ids = encoded_inputs["input_ids"]
     pos_title_token_type_ids = encoded_inputs["token_type_ids"]
 
@@ -107,10 +104,6 @@ def convert_train_example(example,
         text="",
         text_pair=tokens_title_neg+tokens_para_neg,
         max_seq_len=title_max_seq_length)
-
-    # print(example["neg_title"])
-    # print(example["neg_para"])
-    # print(encoded_inputs)
     neg_title_input_ids = encoded_inputs["input_ids"]
     neg_title__token_type_ids = encoded_inputs["token_type_ids"]
 
@@ -147,10 +140,7 @@ def convert_inference_example(example, tokenizer, max_seq_length=128):
     encoded_inputs = tokenizer(text=example["text"], max_seq_len=max_seq_length)
     text_input_ids = encoded_inputs["input_ids"]
     text_token_type_ids = encoded_inputs["token_type_ids"]
-
     result = [text_input_ids, text_token_type_ids]
-    # print("text_input_ids:{}".format(text_input_ids))
-    # print("text_token_type_ids:{}".format(text_token_type_ids))
     return result
 
 
@@ -178,19 +168,7 @@ def convert_inference_example_para(example, tokenizer, max_seq_length=128):
     encoded_inputs = tokenizer(text="",text_pair=example["text"], max_seq_len=max_seq_length)
     text_input_ids =encoded_inputs["input_ids"]
     text_token_type_ids =encoded_inputs["token_type_ids"]
-
     result = [text_input_ids, text_token_type_ids]
-    # print(len(text_input_ids))
-    # print("text_input_ids:{}".format(text_input_ids))
-    # print("text_token_type_ids:{}".format(text_token_type_ids))
-
-    # f = open('tid', 'a')
-    # for tid in range(len(text_input_ids)):
-        # f.write(str(text_input_ids[tid]) + '\t' + example["text"][tid] + '\n')
-            # f.write(str(token_ids_q[tid]) + ' ')
-    # f.write('\t')
-
-
     return result
 
 

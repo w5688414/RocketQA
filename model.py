@@ -60,7 +60,6 @@ class DualEncoder(nn.Layer):
         sequence_output, cls_embedding = model(input_ids, token_type_ids, position_ids,
                                       attention_mask)
         cls_embedding = sequence_output[:, 0]
-        # cls_embedding = self.dropout(cls_embedding)
         return cls_embedding
         
 
@@ -74,8 +73,6 @@ class DualEncoder(nn.Layer):
 
         if self.output_emb_size is not None and self.output_emb_size > 0:
             cls_embedding = self.emb_reduce_linear(cls_embedding)
-        
-        # cls_embedding = self.dropout(cls_embedding)
         return cls_embedding
 
     def get_semantic_embedding(self,model,data_loader):
@@ -139,35 +136,18 @@ class DualEncoder(nn.Layer):
 
         all_title_cls_embedding = paddle.concat(
             x=[pos_title_cls_embedding, neg_title_cls_embedding], axis=0)
-        #print("title cls_emb shape:{}".format(all_title_cls_embedding.shape))
 
         if self.use_cross_batch:
             tensor_list = []
             paddle.distributed.all_gather(tensor_list, all_title_cls_embedding)
             all_title_cls_embedding = paddle.concat(x=tensor_list, axis=0)
-            #print("gathered title cls_emb shape:{}".format(all_title_cls_embedding.shape))
 
         # multiply
         logits = paddle.matmul(
             query_cls_embedding, all_title_cls_embedding, transpose_y=True)
 
-        # substract margin from all positive samples cosine_sim()
-        # margin_diag = paddle.full(
-        #     shape=[query_cls_embedding.shape[0]],
-        #     fill_value=self.margin,
-        #     dtype=paddle.get_default_dtype())
-
-        # cosine_sim = cosine_sim - paddle.diag(margin_diag)
-        # # scale cosine to ease training converge
-        # cosine_sim *= self.sacle
-
-        #all_labels = np.array(range(batch_size * worker_id * 2, batch_size * (worker_id * 2 + 1)), dtype='int64')
-
         batch_size = query_cls_embedding.shape[0]
 
-        # self.rank = 0
-        #print("local rank:{}".format(self.rank))
-        #print("label range:{} \t {}".format(batch_size * self.rank * 2, batch_size * (self.rank * 2 + 1)))
         labels = paddle.arange(
             batch_size * self.rank * 2,
             batch_size * (self.rank * 2 + 1),
