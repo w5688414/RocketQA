@@ -90,10 +90,6 @@ def convert_train_example(example,
     query_input_ids = encoded_inputs["input_ids"]
     query_token_type_ids = encoded_inputs["token_type_ids"]
 
-    # encoded_inputs = tokenizer(
-    #     text=example["pos_title"],
-    #     text_pair=example["pos_para"],
-    #     max_seq_len=title_max_seq_length)
     encoded_inputs = tokenizer(
         text="",
         text_pair=tokens_title_pos+tokens_para_pos,
@@ -102,7 +98,7 @@ def convert_train_example(example,
     # print(example["pos_para"])
     # print(encoded_inputs)
     pos_title_input_ids = encoded_inputs["input_ids"]
-    pos_title__token_type_ids = encoded_inputs["token_type_ids"]
+    pos_title_token_type_ids = encoded_inputs["token_type_ids"]
 
     tokens_title_neg = tokenizer._tokenize(example["neg_title"])
     tokens_para_neg = tokenizer._tokenize(example["neg_para"])
@@ -120,7 +116,7 @@ def convert_train_example(example,
 
     result = [
         query_input_ids, query_token_type_ids, pos_title_input_ids,
-        pos_title__token_type_ids, neg_title_input_ids,
+        pos_title_token_type_ids, neg_title_input_ids,
         neg_title__token_type_ids
     ]
 
@@ -155,14 +151,6 @@ def convert_inference_example(example, tokenizer, max_seq_length=128):
     result = [text_input_ids, text_token_type_ids]
     # print("text_input_ids:{}".format(text_input_ids))
     # print("text_token_type_ids:{}".format(text_token_type_ids))
-
-    # f = open('tid', 'a')
-    # for tid in range(len(text_input_ids)):
-        # f.write(str(text_input_ids[tid]) + '\t' + example["text"][tid] + '\n')
-            # f.write(str(token_ids_q[tid]) + ' ')
-    # f.write('\t')
-
-
     return result
 
 
@@ -211,7 +199,6 @@ def read_train_data(data_path):
     with open(data_path, 'r', encoding='utf-8') as f:
         for line in f:
             data = line.rstrip().split("\t")
-            # print(len(data))
             if len(data) != 6:
                 continue
             yield {

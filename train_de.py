@@ -55,9 +55,7 @@ parser.add_argument(
         '--use_amp',
         action='store_true',
         help='Whether to use float16(Automatic Mixed Precision) to train.')
-parser.add_argument("--scale_loss", type=float, default=128, help="The value of scale_loss for fp16. This is only used for AMP training.")
-# parser.add_argument("--margin", default=0.3, type=float, help="Margin beteween pos_sample and neg_samples")
-# parser.add_argument("--scale", default=30, type=int, help="Scale for pair-wise margin_rank_loss")
+parser.add_argument("--scale_loss", type=float, default=102400, help="The value of scale_loss for fp16. This is only used for AMP training.")
 
 
 args = parser.parse_args()
@@ -155,7 +153,12 @@ def do_train():
         apply_decay_param_fun=lambda x: x in decay_params)
 
     if args.use_amp:
-        scaler = paddle.amp.GradScaler(init_loss_scaling=args.scale_loss)
+        scaler = paddle.amp.GradScaler(init_loss_scaling=args.scale_loss,
+                                                    decr_ratio=0.8,
+                                                    incr_ratio=2.0,
+                                                    incr_every_n_steps=100,
+                                                    decr_every_n_nan_or_inf=2,
+                                                    use_dynamic_loss_scaling=True)
 
     global_step = 0
     tic_train = time.time()

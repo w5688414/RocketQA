@@ -1,8 +1,3 @@
-# export CUDA_VISIBLE_DEVICES=1,2,4,5
-
-# export PYTHONPATH=/wugaosheng/Paddle/python:$PYTHONPATH
-# export PYTHONPATH=/wugaosheng/Paddle:$PYTHONPATH
-# export PYTHONPATH=/wugaosheng/Paddle
 unset CUDA_VISIBLE_DEVICES
 set -x
 
@@ -12,7 +7,6 @@ export FLAGS_sync_nccl_allreduce=1
 
 # export GLOG_v=1
 
-# TRAIN_SET="dureader-retrieval-baseline-dataset/train/dual.train.tsv"
 TRAIN_SET="dureader-retrieval-baseline-dataset/train/dual.train.tsv"
 python -u -m paddle.distributed.launch --gpus "0,1,2,3" \
                     train_de.py \
