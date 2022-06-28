@@ -26,7 +26,7 @@ import paddle.nn.functional as F
 import paddlenlp as ppnlp
 from paddlenlp.data import Stack, Tuple, Pad
 from paddlenlp.datasets import load_dataset
-from paddlenlp.transformers import LinearDecayWithWarmup
+from paddlenlp.transformers import LinearDecayWithWarmup, PolyDecayWithWarmup
 from paddle.distributed.fleet.utils.hybrid_parallel_util import fused_allreduce_gradients
 
 from model import DualEncoder
@@ -49,12 +49,14 @@ parser.add_argument("--init_from_ckpt", type=str, default=None, help="The path o
 parser.add_argument("--seed", type=int, default=1000, help="random seed for initialization")
 parser.add_argument('--device', choices=['cpu', 'gpu'], default="gpu", help="Select which device to train model, defaults to gpu.")
 parser.add_argument('--save_steps', type=int, default=10000, help="Inteval steps to save checkpoint")
+parser.add_argument('--log_steps', type=int, default=100, help="Inteval steps to save checkpoint")
 parser.add_argument("--train_set_file", type=str, required=True, help="The full path of train_set_file")
 parser.add_argument("--use_cross_batch",  action="store_true", help="Whether to use cross-batch for training.")
-
-# parser.add_argument("--margin", default=0.3, type=float, help="Margin beteween pos_sample and neg_samples")
-# parser.add_argument("--scale", default=30, type=int, help="Scale for pair-wise margin_rank_loss")
-
+parser.add_argument(
+        '--use_amp',
+        action='store_true',
+        help='Whether to use float16(Automatic Mixed Precision) to train.')
+parser.add_argument("--scale_loss", type=float, default=102400, help="The value of scale_loss for fp16. This is only used for AMP training.")
 
 args = parser.parse_args()
 # yapf: enable
@@ -74,21 +76,20 @@ def do_train():
         paddle.distributed.init_parallel_env()
 
     set_seed(args.seed)
+    
+    dev_count = paddle.distributed.get_world_size()
 
     train_ds = load_dataset(
         read_train_data, data_path=args.train_set_file, lazy=False)
 
-    # If you wanna use bert/roberta pretrained model,
-    # pretrained_model = ppnlp.transformers.BertModel.from_pretrained('bert-base-chinese')
-    # pretrained_model = ppnlp.transformers.RobertaModel.from_pretrained('roberta-wwm-ext')
-    pretrained_model = ppnlp.transformers.ErnieModel.from_pretrained(
-        'ernie-2.0-en')
+    query_model = ppnlp.transformers.ErnieModel.from_pretrained(
+        'ernie-1.0')
+    title_model = ppnlp.transformers.ErnieModel.from_pretrained(
+        'ernie-1.0')
 
-    # If you wanna use bert/roberta pretrained model,
-    # tokenizer = ppnlp.transformers.BertTokenizer.from_pretrained('bert-base-chinese')
-    # tokenizer = ppnlp.transformers.RobertaTokenizer.from_pretrained('roberta-wwm-ext')
+
     tokenizer = ppnlp.transformers.ErnieTokenizer.from_pretrained(
-        'ernie-2.0-en')
+        'ernie-1.0')
 
     trans_func = partial(
         convert_train_example,
@@ -112,7 +113,7 @@ def do_train():
         batchify_fn=batchify_fn,
         trans_fn=trans_func)
 
-    model = DualEncoder(pretrained_model, use_cross_batch=args.use_cross_batch)
+    model = DualEncoder(query_model,title_model, use_cross_batch=args.use_cross_batch)
 
     if args.init_from_ckpt and os.path.isfile(args.init_from_ckpt):
         state_dict = paddle.load(args.init_from_ckpt)
@@ -121,10 +122,18 @@ def do_train():
 
     model = paddle.DataParallel(model)
 
-    num_training_steps = len(train_data_loader) * args.epochs
+    num_training_examples = len(train_ds)
+    # 4卡 gpu
+    max_train_steps = args.epochs * num_training_examples // args.batch_size // dev_count
+    
+    warmup_steps = int(max_train_steps * args.warmup_proportion)
 
-    lr_scheduler = LinearDecayWithWarmup(args.learning_rate, num_training_steps,
-                                         args.warmup_proportion)
+    print("Device count: %d" % dev_count)
+    print("Num train examples: %d" % num_training_examples)
+    print("Max train steps: %d" % max_train_steps)
+    print("Num warmup steps: %d" % warmup_steps)
+
+    lr_scheduler = PolyDecayWithWarmup(args.learning_rate,max_train_steps,warmup_steps,lr_end=0.0,power=1.0)
 
     # Generate parameter names needed to perform weight decay.
     # All bias and LayerNorm parameters are excluded.
@@ -136,7 +145,16 @@ def do_train():
         learning_rate=lr_scheduler,
         parameters=model.parameters(),
         weight_decay=args.weight_decay,
-        apply_decay_param_fun=lambda x: x in decay_params)
+        apply_decay_param_fun=lambda x: x in decay_params,
+        grad_clip=paddle.nn.ClipGradByGlobalNorm(1.0))
+
+    if args.use_amp:
+        scaler = paddle.amp.GradScaler(init_loss_scaling=args.scale_loss,
+                                                    decr_ratio=0.8,
+                                                    incr_ratio=2.0,
+                                                    incr_every_n_steps=100,
+                                                    decr_every_n_nan_or_inf=2,
+                                                    use_dynamic_loss_scaling=True)
 
     global_step = 0
     tic_train = time.time()
@@ -147,49 +165,77 @@ def do_train():
             (query_input_ids, query_token_type_ids, pos_title_input_ids,
              pos_title_token_type_ids, neg_title_input_ids,
              neg_title_token_type_ids) = batch
+            if args.use_amp:
+                with model.no_sync():
+                    with paddle.amp.auto_cast(args.use_amp,
+                        custom_white_list=['layer_norm', 'softmax', 'gelu', 'tanh']):
+                        loss, accuracy = model(
+                            query_input_ids=query_input_ids,
+                            pos_title_input_ids=pos_title_input_ids,
+                            neg_title_input_ids=neg_title_input_ids,
+                            query_token_type_ids=query_token_type_ids,
+                            pos_title_token_type_ids=pos_title_token_type_ids,
+                            neg_title_token_type_ids=neg_title_token_type_ids)
+                scaler.scale(loss).backward()
+                # step 2 : fuse + allreduce manually before optimization
+                fused_allreduce_gradients(list(model.parameters()), None)
+                scaler.minimize(optimizer, loss)
 
-            # skip gradient synchronization by 'no_sync'
-            with model.no_sync():
-                loss, accuracy = model(
-                    query_input_ids=query_input_ids,
-                    pos_title_input_ids=pos_title_input_ids,
-                    neg_title_input_ids=neg_title_input_ids,
-                    query_token_type_ids=query_token_type_ids,
-                    pos_title_token_type_ids=pos_title_token_type_ids,
-                    neg_title_token_type_ids=neg_title_token_type_ids)
                 avg_loss += loss
 
                 global_step += 1
-                if global_step % 10 == 0:
+                if global_step % args.log_steps == 0:
+                    print("learning_rate: %f" %(lr_scheduler.get_lr()))
                     print(
-                        "global step %d, epoch: %d, batch: %d, loss: %.2f, avg_loss: %.2f, accuracy:%.2f, speed: %.2f step/s"
+                        "global step %d, epoch: %d, batch: %d, loss: %.5f, avg_loss: %.5f, accuracy:%.5f, speed: %.5f step/s"
                         % (global_step, epoch, step, loss,
-                           avg_loss / global_step, 100 * accuracy,
-                           10 / (time.time() - tic_train)))
+                        avg_loss / global_step, 100 * accuracy,
+                        10 / (time.time() - tic_train)))
                     tic_train = time.time()
-                loss.backward()
+            else:
+                # skip gradient synchronization by 'no_sync'
+                with model.no_sync():
+                    loss, accuracy = model(
+                        query_input_ids=query_input_ids,
+                        pos_title_input_ids=pos_title_input_ids,
+                        neg_title_input_ids=neg_title_input_ids,
+                        query_token_type_ids=query_token_type_ids,
+                        pos_title_token_type_ids=pos_title_token_type_ids,
+                        neg_title_token_type_ids=neg_title_token_type_ids)
+                    avg_loss += loss
 
-            # step 2 : fuse + allreduce manually before optimization
-            fused_allreduce_gradients(list(model.parameters()), None)
-
-            optimizer.step()
+                    global_step += 1
+                    if global_step % 10 == 0:
+                        print("learning_rate: %f" %(lr_scheduler.get_lr()))
+                        print(
+                            "global step %d, epoch: %d, batch: %d, loss: %.2f, avg_loss: %.2f, accuracy:%.2f, speed: %.2f step/s"
+                            % (global_step, epoch, step, loss,
+                            avg_loss / global_step, 100 * accuracy,
+                            10 / (time.time() - tic_train)))
+                        tic_train = time.time()
+                    loss.backward()
+                # step 2 : fuse + allreduce manually before optimization
+                fused_allreduce_gradients(list(model.parameters()), None)
+                optimizer.step()
+            
             lr_scheduler.step()
             optimizer.clear_grad()
             if global_step % args.save_steps == 0 and rank == 0:
                 save_dir = os.path.join(args.save_dir, "model_%d" % global_step)
                 if not os.path.exists(save_dir):
                     os.makedirs(save_dir)
-                save_param_path = os.path.join(save_dir, 'model_state.pdparams')
-                paddle.save(model.state_dict(), save_param_path)
+                save_param_path = os.path.join(save_dir, 'query_model_state.pdparams')
+                paddle.save(query_model.state_dict(), save_param_path)
+                save_param_path = os.path.join(save_dir, 'title_model_state.pdparams')
+                paddle.save(title_model.state_dict(), save_param_path)
                 tokenizer.save_pretrained(save_dir)
 
     save_dir = os.path.join(args.save_dir, "model_%d" % global_step)
-    if not os.path.exists(save_dir):
-        os.makedirs(save_dir)
-    save_param_path = os.path.join(save_dir, 'model_state.pdparams')
-    paddle.save(model.state_dict(), save_param_path)
+    save_param_path = os.path.join(save_dir, 'query_model_state.pdparams')
+    paddle.save(query_model.state_dict(), save_param_path)
+    save_param_path = os.path.join(save_dir, 'title_model_state.pdparams')
+    paddle.save(title_model.state_dict(), save_param_path)
     tokenizer.save_pretrained(save_dir)
-
 
 if __name__ == "__main__":
     do_train()

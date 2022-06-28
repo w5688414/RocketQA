@@ -41,6 +41,22 @@ def create_dataloader(dataset,
         collate_fn=batchify_fn,
         return_list=True)
 
+def _truncate_seq_pair(tokens_a, tokens_b, max_length):
+
+    """Truncates a sequence pair in place to the maximum length."""
+
+    # This is a simple heuristic which will always truncate the longer sequence
+    # one token at a time. This makes more sense than truncating an equal percent
+    # of tokens from each, since if one sequence is very short then each token
+    # that's truncated likely contains more information than a longer sequence.
+    while True:
+        total_length = len(tokens_a) + len(tokens_b)
+        if total_length <= max_length:
+            break
+        if len(tokens_a) > len(tokens_b):
+            tokens_a.pop()
+        else:
+            tokens_b.pop()
 
 def convert_train_example(example,
                           tokenizer,
@@ -65,28 +81,35 @@ def convert_train_example(example,
         input_ids(obj:`list[int]`): The list of query token ids.
         token_type_ids(obj: `list[int]`): List of query sequence pair mask.
     """
+    tokens_title_pos = tokenizer._tokenize(example["pos_title"])
+    tokens_para_pos = tokenizer._tokenize(example["pos_para"])
+    _truncate_seq_pair(tokens_title_pos, tokens_para_pos, title_max_seq_length - 3)
+
     encoded_inputs = tokenizer(
         text=example["query"], max_seq_len=query_max_seq_length)
     query_input_ids = encoded_inputs["input_ids"]
     query_token_type_ids = encoded_inputs["token_type_ids"]
 
     encoded_inputs = tokenizer(
-        text=example["pos_title"],
-        text_pair=example["pos_para"],
+        text="",
+        text_pair=tokens_title_pos+tokens_para_pos,
         max_seq_len=title_max_seq_length)
     pos_title_input_ids = encoded_inputs["input_ids"]
-    pos_title__token_type_ids = encoded_inputs["token_type_ids"]
+    pos_title_token_type_ids = encoded_inputs["token_type_ids"]
 
+    tokens_title_neg = tokenizer._tokenize(example["neg_title"])
+    tokens_para_neg = tokenizer._tokenize(example["neg_para"])
+    _truncate_seq_pair(tokens_title_neg, tokens_para_neg, title_max_seq_length - 3)
     encoded_inputs = tokenizer(
-        text=example["neg_title"],
-        text_pair=example["neg_para"],
+        text="",
+        text_pair=tokens_title_neg+tokens_para_neg,
         max_seq_len=title_max_seq_length)
     neg_title_input_ids = encoded_inputs["input_ids"]
     neg_title__token_type_ids = encoded_inputs["token_type_ids"]
 
     result = [
         query_input_ids, query_token_type_ids, pos_title_input_ids,
-        pos_title__token_type_ids, neg_title_input_ids,
+        pos_title_token_type_ids, neg_title_input_ids,
         neg_title__token_type_ids
     ]
 
@@ -117,11 +140,35 @@ def convert_inference_example(example, tokenizer, max_seq_length=128):
     encoded_inputs = tokenizer(text=example["text"], max_seq_len=max_seq_length)
     text_input_ids = encoded_inputs["input_ids"]
     text_token_type_ids = encoded_inputs["token_type_ids"]
-
     result = [text_input_ids, text_token_type_ids]
-    #print("text_input_ids:{}".format(text_input_ids))
-    #print("text_token_type_ids:{}".format(text_token_type_ids))
+    return result
 
+
+def convert_inference_example_para(example, tokenizer, max_seq_length=128):
+    """
+    Builds model inputs from a sequence.
+        
+    A BERT sequence has the following format:
+
+    - single sequence: ``[CLS] X [SEP]``
+
+    Args:
+        example(obj:`list(str)`): The list of text to be converted to ids.
+        tokenizer(obj:`PretrainedTokenizer`): This tokenizer inherits from :class:`~paddlenlp.transformers.PretrainedTokenizer` 
+            which contains most of the methods. Users should refer to the superclass for more information regarding methods.
+        max_seq_len(obj:`int`): The maximum total input sequence length after tokenization. 
+            Sequences longer than this will be truncated, sequences shorter will be padded.
+        is_test(obj:`False`, defaults to `False`): Whether the example contains label or not.
+
+    Returns:
+        input_ids(obj:`list[int]`): The list of query token ids.
+        token_type_ids(obj: `list[int]`): List of query sequence pair mask.
+    """
+
+    encoded_inputs = tokenizer(text="",text_pair=example["text"], max_seq_len=max_seq_length)
+    text_input_ids =encoded_inputs["input_ids"]
+    text_token_type_ids =encoded_inputs["token_type_ids"]
+    result = [text_input_ids, text_token_type_ids]
     return result
 
 
@@ -130,7 +177,7 @@ def read_train_data(data_path):
     with open(data_path, 'r', encoding='utf-8') as f:
         for line in f:
             data = line.rstrip().split("\t")
-            if len(data) != 5:
+            if len(data) != 6:
                 continue
             yield {
                 'query': data[0],
@@ -150,6 +197,19 @@ def read_text(data_path):
                 continue
             yield {'text': data[0]}
 
+def read_dev_text(data_path):
+    """Reads data."""
+    with open(data_path, 'r', encoding='utf-8') as f:
+        for line in f:
+            data = line.rstrip().split("\t")
+            yield {'text': data[0]}
+
+def read_passage_text(data_path):
+    """Reads data."""
+    with open(data_path, 'r', encoding='utf-8') as f:
+        for line in f:
+            data = line.rstrip().split("\t")
+            yield {'text': data[2]}
 
 def gen_id2corpus(corpus_file):
     id2corpus = {}

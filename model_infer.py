@@ -22,17 +22,14 @@ import paddle.nn as nn
 import paddle.nn.functional as F
 
 
-class DualEncoder(nn.Layer):
+class DualEncoderInfer(nn.Layer):
     def __init__(self,
-                 query_model,
-                 title_model,
+                 pretrained_model,
                  dropout=None,
                  output_emb_size=None,
                  use_cross_batch=False):
         super().__init__()
-        self.query_model = query_model
-        self.title_model = title_model
-        
+        self.ernie = pretrained_model
         self.dropout = nn.Dropout(dropout if dropout is not None else 0.1)
 
         # if output_emb_size is not None, then add Linear layer to reduce embedding_size, 
@@ -52,36 +49,37 @@ class DualEncoder(nn.Layer):
         else:
             self.rank = 0
 
-    def get_cls_output(self,model,
+    def get_cls_output(self,
                             input_ids,
                             token_type_ids=None,
                             position_ids=None,
                             attention_mask=None):
-        sequence_output, cls_embedding = model(input_ids, token_type_ids, position_ids,
+        sequence_output, cls_embedding = self.ernie(input_ids, token_type_ids, position_ids,
                                       attention_mask)
         cls_embedding = sequence_output[:, 0]
         return cls_embedding
         
 
-    def get_pooled_embedding(self,model,
+    def get_pooled_embedding(self,
                              input_ids,
                              token_type_ids=None,
                              position_ids=None,
                              attention_mask=None):
-        sequence_output, cls_embedding = model(input_ids, token_type_ids, position_ids,
+        sequence_output, cls_embedding = self.ernie(input_ids, token_type_ids, position_ids,
                                       attention_mask)
 
         if self.output_emb_size is not None and self.output_emb_size > 0:
             cls_embedding = self.emb_reduce_linear(cls_embedding)
+        
         return cls_embedding
 
-    def get_semantic_embedding(self,model,data_loader):
+    def get_semantic_embedding(self, data_loader):
         self.eval()
         with paddle.no_grad():
             for batch_data in data_loader:
                 input_ids, token_type_ids = batch_data
 
-                text_embeddings = self.get_cls_output(model,
+                text_embeddings = self.get_cls_output(
                     input_ids, token_type_ids=token_type_ids)
 
                 yield text_embeddings
@@ -96,11 +94,11 @@ class DualEncoder(nn.Layer):
                    title_position_ids=None,
                    title_attention_mask=None):
 
-        query_cls_embedding = self.get_cls_output(self.query_model,
+        query_cls_embedding = self.get_cls_output(
             query_input_ids, query_token_type_ids, query_position_ids,
             query_attention_mask)
 
-        title_cls_embedding = self.get_cls_output(self.title_model,
+        title_cls_embedding = self.get_cls_output(
             title_input_ids, title_token_type_ids, title_position_ids,
             title_attention_mask)
 
@@ -122,15 +120,15 @@ class DualEncoder(nn.Layer):
                 neg_title_position_ids=None,
                 neg_title_attention_mask=None):
 
-        query_cls_embedding = self.get_cls_output(self.query_model,
+        query_cls_embedding = self.get_cls_output(
             query_input_ids, query_token_type_ids, query_position_ids,
             query_attention_mask)
 
-        pos_title_cls_embedding = self.get_cls_output(self.title_model,
+        pos_title_cls_embedding = self.get_cls_output(
             pos_title_input_ids, pos_title_token_type_ids,
             pos_title_position_ids, pos_title_attention_mask)
 
-        neg_title_cls_embedding = self.get_cls_output(self.title_model,
+        neg_title_cls_embedding = self.get_cls_output(
             neg_title_input_ids, neg_title_token_type_ids,
             neg_title_position_ids, neg_title_attention_mask)
 
