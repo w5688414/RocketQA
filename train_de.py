@@ -168,7 +168,7 @@ def do_train():
             if args.use_amp:
                 with model.no_sync():
                     with paddle.amp.auto_cast(args.use_amp,
-                    custom_white_list=['layer_norm', 'softmax', 'gelu', 'tanh']):
+                        custom_white_list=['layer_norm', 'softmax', 'gelu', 'tanh']):
                         loss, accuracy = model(
                             query_input_ids=query_input_ids,
                             pos_title_input_ids=pos_title_input_ids,
@@ -176,22 +176,22 @@ def do_train():
                             query_token_type_ids=query_token_type_ids,
                             pos_title_token_type_ids=pos_title_token_type_ids,
                             neg_title_token_type_ids=neg_title_token_type_ids)
-                    scaler.scale(loss).backward()
-                    # step 2 : fuse + allreduce manually before optimization
-                    fused_allreduce_gradients(list(model.parameters()), None)
-                    scaler.minimize(optimizer, loss)
+                scaler.scale(loss).backward()
+                # step 2 : fuse + allreduce manually before optimization
+                fused_allreduce_gradients(list(model.parameters()), None)
+                scaler.minimize(optimizer, loss)
 
-                    avg_loss += loss
+                avg_loss += loss
 
-                    global_step += 1
-                    if global_step % args.log_steps == 0:
-                        print("learning_rate: %f" %(lr_scheduler.get_lr()))
-                        print(
-                            "global step %d, epoch: %d, batch: %d, loss: %.5f, avg_loss: %.5f, accuracy:%.5f, speed: %.5f step/s"
-                            % (global_step, epoch, step, loss,
-                            avg_loss / global_step, 100 * accuracy,
-                            10 / (time.time() - tic_train)))
-                        tic_train = time.time()
+                global_step += 1
+                if global_step % args.log_steps == 0:
+                    print("learning_rate: %f" %(lr_scheduler.get_lr()))
+                    print(
+                        "global step %d, epoch: %d, batch: %d, loss: %.5f, avg_loss: %.5f, accuracy:%.5f, speed: %.5f step/s"
+                        % (global_step, epoch, step, loss,
+                        avg_loss / global_step, 100 * accuracy,
+                        10 / (time.time() - tic_train)))
+                    tic_train = time.time()
             else:
                 # skip gradient synchronization by 'no_sync'
                 with model.no_sync():
