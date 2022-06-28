@@ -82,13 +82,12 @@ def do_train():
     train_ds = load_dataset(
         read_train_data, data_path=args.train_set_file, lazy=False)
 
-    # If you wanna use bert/roberta pretrained model,
     query_model = ppnlp.transformers.ErnieModel.from_pretrained(
         'ernie-1.0')
     title_model = ppnlp.transformers.ErnieModel.from_pretrained(
         'ernie-1.0')
 
-    # If you wanna use bert/roberta pretrained model,
+
     tokenizer = ppnlp.transformers.ErnieTokenizer.from_pretrained(
         'ernie-1.0')
 
