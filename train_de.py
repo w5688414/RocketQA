@@ -56,7 +56,7 @@ parser.add_argument(
         '--use_amp',
         action='store_true',
         help='Whether to use float16(Automatic Mixed Precision) to train.')
-parser.add_argument("--scale_loss", type=float, default=102400, help="The value of scale_loss for fp16. This is only used for AMP training.")
+parser.add_argument("--scale_loss", type=float, default=128, help="The value of scale_loss for fp16. This is only used for AMP training.")
 
 args = parser.parse_args()
 # yapf: enable
@@ -82,11 +82,8 @@ def do_train():
     train_ds = load_dataset(
         read_train_data, data_path=args.train_set_file, lazy=False)
 
-    query_model = ppnlp.transformers.ErnieModel.from_pretrained(
+    pretrained_model = ppnlp.transformers.ErnieModel.from_pretrained(
         'ernie-1.0')
-    title_model = ppnlp.transformers.ErnieModel.from_pretrained(
-        'ernie-1.0')
-
 
     tokenizer = ppnlp.transformers.ErnieTokenizer.from_pretrained(
         'ernie-1.0')
@@ -113,7 +110,7 @@ def do_train():
         batchify_fn=batchify_fn,
         trans_fn=trans_func)
 
-    model = DualEncoder(query_model,title_model, use_cross_batch=args.use_cross_batch)
+    model = DualEncoder(pretrained_model, use_cross_batch=args.use_cross_batch)
 
     if args.init_from_ckpt and os.path.isfile(args.init_from_ckpt):
         state_dict = paddle.load(args.init_from_ckpt)
@@ -224,18 +221,15 @@ def do_train():
                 save_dir = os.path.join(args.save_dir, "model_%d" % global_step)
                 if not os.path.exists(save_dir):
                     os.makedirs(save_dir)
-                save_param_path = os.path.join(save_dir, 'query_model_state.pdparams')
-                paddle.save(query_model.state_dict(), save_param_path)
-                save_param_path = os.path.join(save_dir, 'title_model_state.pdparams')
-                paddle.save(title_model.state_dict(), save_param_path)
+                save_param_path = os.path.join(save_dir, 'model_state.pdparams')
+                paddle.save(model.state_dict(), save_param_path)
                 tokenizer.save_pretrained(save_dir)
 
     save_dir = os.path.join(args.save_dir, "model_%d" % global_step)
-    save_param_path = os.path.join(save_dir, 'query_model_state.pdparams')
-    paddle.save(query_model.state_dict(), save_param_path)
-    save_param_path = os.path.join(save_dir, 'title_model_state.pdparams')
-    paddle.save(title_model.state_dict(), save_param_path)
+    save_param_path = os.path.join(save_dir, 'model_state.pdparams')
+    paddle.save(model.state_dict(), save_param_path)
     tokenizer.save_pretrained(save_dir)
+
 
 if __name__ == "__main__":
     do_train()

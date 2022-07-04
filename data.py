@@ -41,22 +41,6 @@ def create_dataloader(dataset,
         collate_fn=batchify_fn,
         return_list=True)
 
-def _truncate_seq_pair(tokens_a, tokens_b, max_length):
-
-    """Truncates a sequence pair in place to the maximum length."""
-
-    # This is a simple heuristic which will always truncate the longer sequence
-    # one token at a time. This makes more sense than truncating an equal percent
-    # of tokens from each, since if one sequence is very short then each token
-    # that's truncated likely contains more information than a longer sequence.
-    while True:
-        total_length = len(tokens_a) + len(tokens_b)
-        if total_length <= max_length:
-            break
-        if len(tokens_a) > len(tokens_b):
-            tokens_a.pop()
-        else:
-            tokens_b.pop()
 
 def convert_train_example(example,
                           tokenizer,
@@ -81,36 +65,32 @@ def convert_train_example(example,
         input_ids(obj:`list[int]`): The list of query token ids.
         token_type_ids(obj: `list[int]`): List of query sequence pair mask.
     """
-    tokens_title_pos = tokenizer._tokenize(example["pos_title"])
-    tokens_para_pos = tokenizer._tokenize(example["pos_para"])
-    _truncate_seq_pair(tokens_title_pos, tokens_para_pos, title_max_seq_length - 3)
-
     encoded_inputs = tokenizer(
         text=example["query"], max_seq_len=query_max_seq_length)
     query_input_ids = encoded_inputs["input_ids"]
     query_token_type_ids = encoded_inputs["token_type_ids"]
 
+    # Place title to sentence 1 and paragraph to sentence 2
     encoded_inputs = tokenizer(
-        text="",
-        text_pair=tokens_title_pos+tokens_para_pos,
-        max_seq_len=title_max_seq_length)
+        text=example["pos_title"],
+        text_pair=example["pos_para"],
+        max_seq_len=title_max_seq_length,
+        truncation_strategy="longest_first")
     pos_title_input_ids = encoded_inputs["input_ids"]
     pos_title_token_type_ids = encoded_inputs["token_type_ids"]
 
-    tokens_title_neg = tokenizer._tokenize(example["neg_title"])
-    tokens_para_neg = tokenizer._tokenize(example["neg_para"])
-    _truncate_seq_pair(tokens_title_neg, tokens_para_neg, title_max_seq_length - 3)
     encoded_inputs = tokenizer(
-        text="",
-        text_pair=tokens_title_neg+tokens_para_neg,
-        max_seq_len=title_max_seq_length)
+        text=example["neg_title"],
+        text_pair=example["neg_para"],
+        max_seq_len=title_max_seq_length,
+        truncation_strategy="longest_first")
     neg_title_input_ids = encoded_inputs["input_ids"]
-    neg_title__token_type_ids = encoded_inputs["token_type_ids"]
+    neg_title_token_type_ids = encoded_inputs["token_type_ids"]
 
     result = [
         query_input_ids, query_token_type_ids, pos_title_input_ids,
         pos_title_token_type_ids, neg_title_input_ids,
-        neg_title__token_type_ids
+        neg_title_token_type_ids
     ]
 
     return result
@@ -165,12 +145,15 @@ def convert_inference_example_para(example, tokenizer, max_seq_length=128):
         token_type_ids(obj: `list[int]`): List of query sequence pair mask.
     """
 
-    encoded_inputs = tokenizer(text="",text_pair=example["text"], max_seq_len=max_seq_length)
+    encoded_inputs = tokenizer(
+        text=example['title'],
+        text_pair=example["para"], 
+        max_seq_len=max_seq_length,
+        truncation_strategy="longest_first")
     text_input_ids =encoded_inputs["input_ids"]
     text_token_type_ids =encoded_inputs["token_type_ids"]
     result = [text_input_ids, text_token_type_ids]
     return result
-
 
 def read_train_data(data_path):
     """Reads data."""
@@ -186,7 +169,6 @@ def read_train_data(data_path):
                 'neg_title': data[3],
                 'neg_para': data[4]
             }
-
 
 def read_text(data_path):
     """Reads data."""
@@ -209,11 +191,4 @@ def read_passage_text(data_path):
     with open(data_path, 'r', encoding='utf-8') as f:
         for line in f:
             data = line.rstrip().split("\t")
-            yield {'text': data[2]}
-
-def gen_id2corpus(corpus_file):
-    id2corpus = {}
-    with open(corpus_file, 'r', encoding='utf-8') as f:
-        for idx, line in enumerate(f):
-            id2corpus[idx] = line.rstrip()
-    return id2corpus
+            yield {'title': data[1],'para':data[2]}
