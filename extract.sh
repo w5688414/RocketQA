@@ -2,9 +2,10 @@ unset CUDA_VISIBLE_DEVICES
 CHECKPOINT_PATH=model_17370/
 TEST_SET="dureader-retrieval-baseline-dataset/dev/dev.q.format" 
 DATA_PATH="dureader-retrieval-baseline-dataset/passage-collection"
-CUDA_VISIBLE_DEVICES=0 python inference_de.py --text_file $TEST_SET \
-                    --output_file output \
-                    --params_path checkpoint_single/${CHECKPOINT_PATH}/model_state.pdparams \
+CUDA_VISIBLE_DEVICES=0 python inference_de.py \
+                    --text_file $TEST_SET \
+                    --output_path output \
+                    --params_path checkpoint/${CHECKPOINT_PATH}/model_state.pdparams \
                     --output_emb_size 0 \
                     --mode query \
                     --batch_size 256 \
@@ -13,10 +14,11 @@ CUDA_VISIBLE_DEVICES=0 python inference_de.py --text_file $TEST_SET \
 for part in 0 1 2 3;do
     TASK_DATA_PATH=${DATA_PATH}/part-0${part}
     count=$((part))
-    CUDA_VISIBLE_DEVICES=${count} nohup python inference_de.py --text_file $TASK_DATA_PATH \
-                        --output_file output \
+    CUDA_VISIBLE_DEVICES=${count} nohup python inference_de.py \
+                        --text_file $TASK_DATA_PATH \
+                        --output_path output \
                         --mode title \
-                        --params_path checkpoint_single/${CHECKPOINT_PATH}/model_state.pdparams \
+                        --params_path checkpoint/${CHECKPOINT_PATH}/model_state.pdparams \
                         --output_emb_size 0 \
                         --batch_size 256 \
                         --max_seq_length 384 >> output/test.log &

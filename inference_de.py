@@ -34,7 +34,7 @@ from model import DualEncoder
 # yapf: disable
 parser = argparse.ArgumentParser()
 parser.add_argument("--text_file", type=str, required=True, help="The full path of input file")
-parser.add_argument("--output_file", default="output", type=str, required=True, help="The full path of output file to save text embedddings")
+parser.add_argument("--output_path", default="output", type=str, required=True, help="The full path of output file to save text embedddings")
 parser.add_argument("--params_path", type=str, required=True, help="The path to model parameters to be loaded.")
 parser.add_argument("--max_seq_length", default=64, type=int, help="The maximum total input sequence length after tokenization. "
     "Sequences longer than this will be truncated, sequences shorter will be padded.")
@@ -72,7 +72,6 @@ if __name__ == "__main__":
     model_name_or_path = 'ernie-1.0'
     tokenizer = ppnlp.transformers.ErnieTokenizer.from_pretrained(
         model_name_or_path)
-
     batchify_fn = lambda samples, fn=Tuple(
         Pad(axis=0, pad_val=tokenizer.pad_token_id, dtype='int64'),  # query_input
         Pad(axis=0, pad_val=tokenizer.pad_token_type_id, dtype='int64'),  # query_segment
@@ -90,7 +89,6 @@ if __name__ == "__main__":
                         tokenizer=tokenizer,
                         max_seq_length=args.max_seq_length)
     param_name = args.text_file.split('/')[-1]
-
     valid_data_loader = create_dataloader(
         valid_ds,
         mode='predict',
@@ -114,9 +112,8 @@ if __name__ == "__main__":
     else:
         raise ValueError(
             "Please set --params_path with correct pretrained model file")
-
     embeddings = predict(model, valid_data_loader)
     print("final embedding:{}".format(embeddings[0, :20]))
     print(embeddings.shape)
-    np.save('./output/{}'.format(param_name),np.array(embeddings))
+    np.save('./{}/{}'.format(args.output_path,param_name),np.array(embeddings))
 

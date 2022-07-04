@@ -120,9 +120,7 @@ def do_train():
     model = paddle.DataParallel(model)
 
     num_training_examples = len(train_ds)
-    # 4卡 gpu
     max_train_steps = args.epochs * num_training_examples // args.batch_size // dev_count
-    
     warmup_steps = int(max_train_steps * args.warmup_proportion)
 
     print("Device count: %d" % dev_count)
@@ -155,7 +153,6 @@ def do_train():
 
     global_step = 0
     tic_train = time.time()
-
     avg_loss = 0.0
     for epoch in range(1, args.epochs + 1):
         for step, batch in enumerate(train_data_loader, start=1):
@@ -224,12 +221,11 @@ def do_train():
                 save_param_path = os.path.join(save_dir, 'model_state.pdparams')
                 paddle.save(model.state_dict(), save_param_path)
                 tokenizer.save_pretrained(save_dir)
-
+    # save last step checkpoint
     save_dir = os.path.join(args.save_dir, "model_%d" % global_step)
     save_param_path = os.path.join(save_dir, 'model_state.pdparams')
     paddle.save(model.state_dict(), save_param_path)
     tokenizer.save_pretrained(save_dir)
-
 
 if __name__ == "__main__":
     do_train()

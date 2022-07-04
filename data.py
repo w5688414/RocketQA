@@ -15,9 +15,7 @@
 import os
 
 import paddle
-
 from paddlenlp.utils.log import logger
-
 
 def create_dataloader(dataset,
                       mode='train',
