@@ -6,7 +6,6 @@ import math
 import numpy as np
 from tqdm import tqdm 
 
-
 def build_engine(para_emb_list, dim):
     index = faiss.IndexFlatIP(dim)
     # add paragraph embedding
@@ -26,8 +25,6 @@ def build_index():
 def main():
     print('building index')
     build_index()
-
- 
 
 if __name__ == "__main__":
     main()

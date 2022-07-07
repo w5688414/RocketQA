@@ -1,26 +1,24 @@
-
 unset CUDA_VISIBLE_DEVICES
-export CUDA_VISIBLE_DEVICES=4,5,6,7
-export FLAGS_eager_delete_tensor_gb=0.0
-export FLAGS_sync_nccl_allreduce=1
-export FLAGS_fraction_of_gpu_memory_to_use=0.95
-CHECKPOINT_PATH=model_26055/
+CHECKPOINT_PATH=model_17370/
 TEST_SET="dureader-retrieval-baseline-dataset/dev/dev.q.format" 
 DATA_PATH="dureader-retrieval-baseline-dataset/passage-collection"
-CUDA_VISIBLE_DEVICES=4 python inference_de_query.py --text_file $TEST_SET \
-                    --output_file output \
-                    --params_path checkpoint/${CHECKPOINT_PATH}/query_model_state.pdparams \
+CUDA_VISIBLE_DEVICES=0 python inference_de.py \
+                    --text_file $TEST_SET \
+                    --output_path output \
+                    --params_path checkpoint/${CHECKPOINT_PATH}/model_state.pdparams \
                     --output_emb_size 0 \
+                    --mode query \
                     --batch_size 256 \
                     --max_seq_length 32
-
 # extract para
 for part in 0 1 2 3;do
     TASK_DATA_PATH=${DATA_PATH}/part-0${part}
-    count=$((part+4))
-    CUDA_VISIBLE_DEVICES=${count} nohup python inference_de_title.py --text_file $TASK_DATA_PATH \
-                        --output_file output \
-                        --params_path checkpoint/${CHECKPOINT_PATH}/title_model_state.pdparams \
+    count=$((part))
+    CUDA_VISIBLE_DEVICES=${count} nohup python inference_de.py \
+                        --text_file $TASK_DATA_PATH \
+                        --output_path output \
+                        --mode title \
+                        --params_path checkpoint/${CHECKPOINT_PATH}/model_state.pdparams \
                         --output_emb_size 0 \
                         --batch_size 256 \
                         --max_seq_length 384 >> output/test.log &
@@ -33,5 +31,5 @@ TOP_K=50
 TEST_SET="dureader-retrieval-baseline-dataset/dev/dev.q.format"
 python build_index.py
 for part in 0 1 2 3;do
-    CUDA_VISIBLE_DEVICES=4 python index_search.py $part $TOP_K $TEST_SET
+    CUDA_VISIBLE_DEVICES=1 python index_search.py $part $TOP_K $TEST_SET
 done

@@ -13,7 +13,6 @@ def build_engine(para_emb_list, dim):
     index.add(p_emb_matrix.astype('float32'))
     return index
 
-
 def read_embed(file_name, dim=768, bs=3000):
     if file_name.endswith('npy'):
         i = 0
@@ -73,7 +72,6 @@ def main():
     emb_file = 'output/query_embedding.npy'
     search(engine, emb_file, qid_list, outfile, topk)
  
-
 if __name__ == "__main__":
     main()
 
